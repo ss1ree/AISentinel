@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/* Настройки шрифтов и плавности для всего приложения */
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-content: center;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #f8fafc; /* slate-50 */
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Красивый скроллбар для современных браузеров */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+@media print {
+  /* Прячем абсолютно всё */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Показываем только блок отчета и всё внутри него */
+  #printable-report, #printable-report * {
+    visibility: visible;
+  }
+  
+  /* Разворачиваем отчет на всю страницу */
+  #printable-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+  }
+
+  /* Заставляем браузер печатать фоновые цвета (важно для подсветки ошибок) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* Стили для сгенерированного HTML (чтобы теги <mark> выглядели красиво) */
+.prose mark {
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+}

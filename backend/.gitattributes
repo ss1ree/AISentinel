@@ -1,0 +1,1 @@
+studying/ai_detector_model4/model.safetensors filter=lfs diff=lfs merge=lfs -text
