@@ -26,6 +26,7 @@ import re
 import subprocess
 import platform
 
+torch.set_num_threads(1)
 
 database.Base.metadata.create_all(bind=database.engine)
 
@@ -55,8 +56,30 @@ app.add_middleware(
 )
 
 # Загружаем модель для сравнения смыслов (около 400 МБ)
-print("Загрузка семантической модели...")
-semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+# print("Загрузка семантической модели...")
+# semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+semantic_model = None
+ai_classifier = None
+
+@app.on_event("startup")
+async def load_models():
+    global semantic_model, ai_classifier
+    print("Загрузка моделей в память...")
+    # Загружаем только когда сервер уже запущен
+    semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+    
+    model_path = os.path.abspath("./studying/ai_detector_model4")
+    if os.path.exists(model_path):
+        ai_classifier = pipeline(
+            "text-classification",
+            model=model_path,
+            tokenizer=model_path,
+            device=-1, # -1 заставляет использовать CPU (0 - это GPU)
+            truncation=True,
+            max_length=512,
+        )
+    print("Все модели успешно загружены!")
+
 
 model_path = os.path.abspath("./studying/ai_detector_model4")
 if os.path.exists(model_path):
