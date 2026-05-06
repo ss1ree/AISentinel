@@ -33,10 +33,18 @@ database.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI()
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:5173"], 
+#     allow_credentials=True, # Это разрешает передачу кук
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"], 
-    allow_credentials=True, # Это разрешает передачу кук
+    allow_origins=["https://your-frontend-name.vercel.app"], 
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

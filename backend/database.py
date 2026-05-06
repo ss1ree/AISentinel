@@ -2,9 +2,11 @@ from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, T
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import datetime
+import os
 
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 # Строка подключения к PostgreSQL в Docker
-SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost:5432/ai_detector"
+# SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost:5432/ai_detector"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
