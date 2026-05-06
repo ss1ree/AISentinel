@@ -14,7 +14,6 @@ import fitz  # PyMuPDF
 import bcrypt
 from sentence_transformers import SentenceTransformer, util
 import re
-from docx2pdf import convert
 import tempfile
 import os
 # import json
@@ -23,7 +22,6 @@ import csv
 # import ollama
 import torch
 from striprtf.striprtf import rtf_to_text
-import win32com.client
 import pythoncom
 from striprtf.striprtf import rtf_to_text
 import re
@@ -45,7 +43,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://your-frontend-name.vercel.app"], 
+    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -510,8 +508,8 @@ def login(email: str, password: str, response: Response, db: Session = Depends(g
         value=token, 
         httponly=True, 
         max_age=604800, 
-        samesite="lax",   # Обязательно "lax" для работы между портами 5173 и 8000
-        secure=False,      # Обязательно False, так как у тебя нет SSL/HTTPS
+        samesite="none",   # Обязательно "lax" для работы между портами 5173 и 8000
+        secure=True,      # Обязательно False, так как у тебя нет SSL/HTTPS
         domain=None        # На localhost лучше не указывать домен явно
     )
     return {"email": user.email}
@@ -809,6 +807,9 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
             with open(file_path, "wb") as f: f.write(file_bytes)
 
             if platform.system() == "Windows":
+                from docx2pdf import convert
+                import win32com.client
+
                 if ext == "docx":
                     with tempfile.TemporaryDirectory() as temp_dir:
                         docx_path = os.path.abspath(os.path.join(temp_dir, "temp.docx"))

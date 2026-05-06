@@ -3,12 +3,11 @@ uvicorn
 sqlalchemy
 psycopg2-binary
 transformers
-torch --index-url https://download.pytorch.org/whl/cpu
 sentence-transformers
 python-docx
 pymupdf
 striprtf
+python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
 bcrypt
-python-multipart
