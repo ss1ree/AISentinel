@@ -1,7 +1,5 @@
 accuracy_plot.png
 loss_plot.png
-package-lock.json
-package.json
 
 venv/
 env/
