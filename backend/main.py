@@ -22,8 +22,6 @@ import csv
 # import ollama
 import torch
 from striprtf.striprtf import rtf_to_text
-import pythoncom
-from striprtf.striprtf import rtf_to_text
 import re
 import subprocess
 import platform
@@ -822,6 +820,7 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
             if platform.system() == "Windows":
                 from docx2pdf import convert
                 import win32com.client
+                import pythoncom
 
                 if ext == "docx":
                     with tempfile.TemporaryDirectory() as temp_dir:
