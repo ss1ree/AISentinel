@@ -41,9 +41,16 @@ app = FastAPI()
 #     allow_headers=["*"],
 # )
 
+IS_PRODUCTION = os.getenv("IS_PRODUCTION", "false").lower() == "true"
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
+    allow_origins=[
+        frontend_url,
+        "https://ai-sentinel-ppd9-chi.vercel.app", # Твой адрес из ошибки
+        "http://localhost:5173"
+    ], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -495,28 +502,34 @@ def register(email: str, password: str, db: Session = Depends(get_db)):
 
 @app.post("/login")
 def login(email: str, password: str, response: Response, db: Session = Depends(get_db)):
-    # ... логика проверки пароля ...
     user = db.query(database.User).filter(database.User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
         return {"error": "Неверные данные"}
     
     token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
     
-    # Устанавливаем куку правильно
+    # Устанавливаем куку
     response.set_cookie(
         key="access_token", 
         value=token, 
         httponly=True, 
-        max_age=604800, 
-        samesite="none",   # Обязательно "lax" для работы между портами 5173 и 8000
-        secure=True,      # Обязательно False, так как у тебя нет SSL/HTTPS
-        domain=None        # На localhost лучше не указывать домен явно
+        max_age=604800, # 7 дней
+        # Если это продакшен (Railway) -> samesite="none" и secure=True
+        # Если это локалка -> samesite="lax" и secure=False
+        samesite="none" if IS_PRODUCTION else "lax",
+        secure=True if IS_PRODUCTION else False,
+        domain=None 
     )
     return {"email": user.email}
 
 @app.post("/logout")
 def logout(response: Response):
-    response.delete_cookie("access_token")
+    # При удалении куки ОБЯЗАТЕЛЬНО указываем те же параметры, что и при создании
+    response.delete_cookie(
+        "access_token",
+        samesite="none" if IS_PRODUCTION else "lax",
+        secure=True if IS_PRODUCTION else False
+    )
     return {"message": "Вышли"}
 
 @app.get("/me")
