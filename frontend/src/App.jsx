@@ -39,13 +39,15 @@ function App() {
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   
 
   // 1. Проверка текущей сессии при загрузке
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const res = await axios.get('http://localhost:8000/me');
+        const res = await axios.get(`${API_URL}/me`);
         if (res.data && res.data.email) {
           setUser(res.data);
           await fetchSettings();
@@ -69,7 +71,7 @@ function App() {
 
   const fetchAdminUsers = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/admin/users');
+      const res = await axios.get(`${API_URL}/admin/users`);
       setAdminUsers(res.data);
     } catch (e) { console.error("Ошибка загрузки пользователей", e); }
   };
@@ -82,7 +84,7 @@ function App() {
     
     // 2. Сразу отправляем на сервер для сохранения в БД
     try {
-      await axios.post('http://localhost:8000/settings', updatedSettings);
+      await axios.post(`${API_URL}/settings`, updatedSettings);
     } catch (e) {
       console.error("Ошибка сохранения тумблера:", e);
     }
@@ -90,7 +92,7 @@ function App() {
 
   const sendFeedback = async (resultId, isCorrect) => {
     try {
-      const response = await fetch(`http://localhost:8000/feedback/${resultId}?correct=${isCorrect}`, {
+      const response = await fetch(`${API_URL}/feedback/${resultId}?correct=${isCorrect}`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -107,7 +109,7 @@ function App() {
 
   const checkUser = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/me');
+      const res = await axios.get(`${API_URL}/me`);
       if (!res.data.error) {
         setUser(res.data);
         fetchHistory();
@@ -117,7 +119,7 @@ function App() {
 
   const fetchHistory = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/history');
+      const res = await axios.get(`${API_URL}/history`);
       setHistory(Array.isArray(res.data) ? res.data.reverse() : []);
     } catch (e) { console.error(e); }
   };
@@ -127,7 +129,7 @@ function App() {
     e.preventDefault();
     const url = authMode === 'login' ? 'login' : 'register';
     try {
-      const res = await axios.post(`http://localhost:8000/${url}?email=${email}&password=${password}`);
+      const res = await axios.post(`${API_URL}/${url}?email=${email}&password=${password}`);
       if (res.data.error) {
         alert(res.data.error);
       } else {
@@ -143,7 +145,7 @@ function App() {
   };
 
   const handleLogout = async () => {
-    await axios.post('http://localhost:8000/logout');
+    await axios.post(`${API_URL}/logout`);
     setUser(null);
     setHistory([]);
     setResult(null);
@@ -156,7 +158,7 @@ function App() {
     if (!text || text.length < 10) return;
     setLoading(true);
     try {
-      const response = await axios.post(`http://localhost:8000/analyze?text=${encodeURIComponent(text)}`);
+      const response = await axios.post(`${API_URL}/analyze?text=${encodeURIComponent(text)}`);
       setResult(response.data);
       fetchHistory();
     } catch (error) { alert("Ошибка анализа"); }
@@ -174,7 +176,7 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:8000/analyze-file', formData);
+      const response = await axios.post(`${API_URL}/analyze-file`, formData);
       setResult(response.data);
       setText(response.data.text_content || "");
       fetchHistory();
@@ -256,7 +258,7 @@ function App() {
   // --- ЗАГРУЗКА НАСТРОЕК С СЕРВЕРА ---
   const fetchSettings = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/settings');
+      const res = await axios.get(`${API_URL}/settings`);
       if (res.data && !res.data.error) {
         setSettings(res.data);
       }
@@ -273,7 +275,7 @@ function App() {
 
   const saveSettings = async () => {
     try {
-      await axios.post('http://localhost:8000/settings', settings);
+      await axios.post(`${API_URL}/settings`, settings);
       showStatus("Настройки успешно сохранены");
     } catch (e) {
       showStatus("Ошибка при сохранении", "error");
@@ -282,7 +284,7 @@ function App() {
 
   const resetSettings = async () => {
     try {
-      const res = await axios.post('http://localhost:8000/settings/reset');
+      const res = await axios.post(`${API_URL}/settings/reset`);
       setSettings(res.data);
       showStatus("Параметры сброшены до АПАК");
     } catch (e) {
@@ -292,7 +294,7 @@ function App() {
 
   const deleteHistoryItem = async (id) => {
     try {
-      await axios.delete(`http://localhost:8000/history/${id}`);
+      await axios.delete(`${API_URL}/history/${id}`);
       fetchHistory();
     } catch (e) { console.error(e); }
   };
@@ -300,7 +302,7 @@ function App() {
   const deleteAllHistory = async () => {
     if (!window.confirm("Вы уверены, что хотите удалить ВСЮ свою историю?")) return;
     try {
-      await axios.delete(`http://localhost:8000/history/all`);
+      await axios.delete(`${API_URL}/history/all`);
       fetchHistory();
     } catch (e) { console.error(e); }
   };
@@ -308,7 +310,7 @@ function App() {
   const adminDeleteUser = async (id) => {
     if (!window.confirm("Удалить пользователя и все его данные?")) return;
     try {
-      await axios.delete(`http://localhost:8000/admin/users/${id}`);
+      await axios.delete(`${API_URL}/admin/users/${id}`);
       fetchAdminUsers();
     } catch (e) { alert("Ошибка удаления"); }
   };
@@ -316,7 +318,7 @@ function App() {
   const adminWipeAllHistory = async () => {
     if (!window.confirm("ВНИМАНИЕ! Это удалит историю ВСЕХ пользователей. Продолжить?")) return;
     try {
-      await axios.delete(`http://localhost:8000/admin/history/wipe-all`);
+      await axios.delete(`${API_URL}/admin/history/wipe-all`);
       alert("Глобальная база очищена.");
       fetchAdminUsers();
     } catch (e) { alert("Ошибка очистки"); }
