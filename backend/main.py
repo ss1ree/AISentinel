@@ -319,16 +319,23 @@ def clean_text_thoroughly(text: str) -> str:
 
 def run_ai_logic(text: str):
     import gc
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
     # 1. Загрузка классификатора (локально внутри функции)
     print("Эконом-загрузка детектора ИИ...")
-    model_path = "ss1ree/ai-sentinel-model"
+    model_name  = "ss1ree/ai-sentinel-model"
+    raw_classifier = AutoModelForSequenceClassification.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    quantized_model = torch.quantization.quantize_dynamic(raw_classifier, {torch.nn.Linear}, dtype=torch.qint8)
+
     classifier = pipeline(
         "text-classification",
-        model=model_path,
-        tokenizer=model_path,
+        model=quantized_model,
+        tokenizer=tokenizer,
         device=-1,
         low_cpu_mem_usage=True
     )
+    del raw_classifier
+    gc.collect()
 
     # 1. Очистка текста
     clean_text = clean_text_thoroughly(text)
@@ -398,10 +405,10 @@ def run_ai_logic(text: str):
     # Порог принятия решения — 50%
     label = "AI" if final_score > 0.65 else "Human"
     
+    del quantized_model
     del classifier
-    gc.collect() # Принудительная очистка RAM
-    print("Детектор ИИ выгружен из памяти")
-
+    gc.collect()
+    print("Детектор ИИ выгружен.")
     return label, round(float(final_score), 2), len(chunks)
 
 # Функция для извлечения текста
