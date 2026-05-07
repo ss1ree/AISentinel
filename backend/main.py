@@ -447,6 +447,7 @@ async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
     return content
 
 def check_semantic_rules(doc, settings: database.CheckSettings):
+    sem_model, _ = get_models() 
     errors = []
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     full_text_lower = "\n".join(paragraphs).lower()
@@ -481,8 +482,8 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     # 1. Проверка перевода организации
     if settings.check_translation:
         if org_ru and org_en:
-            emb1 = semantic_model.encode(org_ru, convert_to_tensor=True)
-            emb2 = semantic_model.encode(org_en, convert_to_tensor=True)
+            emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
+            emb2 = sem_model.encode(org_en, convert_to_tensor=True)
             similarity = util.pytorch_cos_sim(emb1, emb2).item()
             if similarity < 0.7:
                 errors.append(f"[NLP] Перевод организации: сходство {int(similarity*100)}% (проверьте блоки RU/EN)")
@@ -493,8 +494,8 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     # 2. Проверка аннотации
     if settings.check_abstract:
         if abstract_text and main_body:
-            emb_a = semantic_model.encode(abstract_text, convert_to_tensor=True)
-            emb_m = semantic_model.encode(main_body[:1000], convert_to_tensor=True)
+            emb_a = sem_model.encode(abstract_text, convert_to_tensor=True)
+            emb_m = sem_model.encode(main_body[:1000], convert_to_tensor=True)
             sim = util.pytorch_cos_sim(emb_a, emb_m).item()
             if sim < 0.35: # Порог чуть снижен для более гибкой проверки
                 errors.append(f"[NLP] Аннотация: слабое соответствие теме статьи ({int(sim*100)}%)")
