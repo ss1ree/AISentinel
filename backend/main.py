@@ -36,6 +36,8 @@ if IS_WINDOWS:
         pass
 
 
+os.environ['TRANSFORMERS_CACHE'] = '/tmp/huggingface_cache'
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = '/tmp/sentence_transformers_cache'
 torch.set_num_threads(1)
 
 database.Base.metadata.create_all(bind=database.engine)
@@ -72,25 +74,43 @@ semantic_model = None
 ai_classifier = None
 
 def get_models():
-    """Функция для получения моделей с ленивой загрузкой"""
     global semantic_model, ai_classifier
     
     if semantic_model is None:
-        print("Загрузка семантической модели (L6-версия)...")
-        # Используем L6 вместо L12 — она гораздо легче
-        semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+        print("Загрузка и квантование семантической модели...")
+        # Загружаем модель
+        raw_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+        # Применяем квантование (сжимаем веса в 8 бит)
+        semantic_model = torch.quantization.quantize_dynamic(
+            raw_model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+        del raw_model # Удаляем оригинал из памяти
+        gc.collect()
         
     if ai_classifier is None:
-        print("Загрузка классификатора ИИ с Hugging Face...")
-        model_path = "ss1ree/ai-sentinel-model"
+        print("Загрузка и квантование классификатора ИИ...")
+        model_name = "ss1ree/ai-sentinel-model"
+        # Загружаем модель отдельно от пайплайна для квантования
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        
+        raw_classifier = AutoModelForSequenceClassification.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Квантуем классификатор
+        quantized_model = torch.quantization.quantize_dynamic(
+            raw_classifier, {torch.nn.Linear}, dtype=torch.qint8
+        )
+        
+        # Создаем пайплайн с уже сжатой моделью
         ai_classifier = pipeline(
             "text-classification",
-            model=model_path,
-            tokenizer=model_path,
-            device=-1, # Force CPU
-            truncation=True,
-            max_length=512
+            model=quantized_model,
+            tokenizer=tokenizer,
+            device=-1
         )
+        del raw_classifier
+        gc.collect()
+        
     return semantic_model, ai_classifier
 
 
