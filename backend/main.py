@@ -439,6 +439,7 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     import torch
     errors = []
     
+    
     # 1. Предварительная подготовка текста (не требует памяти модели)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     full_text_lower = "\n".join(paragraphs).lower()
