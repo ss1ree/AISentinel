@@ -26,6 +26,16 @@ import re
 import subprocess
 import platform
 
+IS_WINDOWS = platform.system() == "Windows"
+if IS_WINDOWS:
+    try:
+        import pythoncom
+        import win32com.client
+        from docx2pdf import convert
+    except ImportError:
+        pass
+
+
 torch.set_num_threads(1)
 
 database.Base.metadata.create_all(bind=database.engine)
@@ -780,73 +790,57 @@ def update_settings(new_settings: dict, db: Session = Depends(get_db), user: dat
     return db_settings
 
 def convert_to_pdf_linux(input_path, output_dir):
-    """Универсальная конвертация в PDF через LibreOffice для Linux"""
+    """Конвертация через LibreOffice на Linux (Railway)"""
     try:
+        # Указываем домашнюю папку для LibreOffice в /tmp (важно для Docker)
+        env = os.environ.copy()
+        env['HOME'] = '/tmp'
         subprocess.run([
             'soffice', '--headless', '--convert-to', 'pdf', 
             '--outdir', output_dir, input_path
-        ], check=True)
+        ], check=True, env=env, timeout=30)
         return True
     except Exception as e:
         print(f"Ошибка LibreOffice: {e}")
         return False
 
 def convert_doc_to_docx(file_bytes: bytes) -> bytes:
-    if platform.system() == "Windows":
-        import win32com.client
-        import pythoncom
-        import tempfile
-        import os
-        
+    """Конвертирует старый .doc в современный .docx"""
+    if IS_WINDOWS:
+        # Логика для Windows (локально)
         with tempfile.TemporaryDirectory() as temp_dir:
             doc_path = os.path.abspath(os.path.join(temp_dir, "temp.doc"))
             docx_path = os.path.abspath(os.path.join(temp_dir, "temp.docx"))
-            
-            # Сохраняем присланные байты как .doc
-            with open(doc_path, "wb") as f:
-                f.write(file_bytes)
-                
+            with open(doc_path, "wb") as f: f.write(file_bytes)
             try:
-                # Запускаем скрытый Word для конвертации
                 pythoncom.CoInitialize()
                 word = win32com.client.DispatchEx("Word.Application")
                 word.Visible = False
-                
-                # Открываем .doc и пересохраняем как .docx (FileFormat=16)
                 wb_doc = word.Documents.Open(doc_path)
-                wb_doc.SaveAs(docx_path, FileFormat=16)
+                wb_doc.SaveAs(docx_path, FileFormat=16) # 16 = wdFormatXMLDocument
                 wb_doc.Close(0)
-            except Exception as e:
-                print(f"Ошибка конвертации DOC в DOCX: {e}")
-            finally:
                 word.Quit()
-                
-            # Возвращаем новые байты .docx (если получилось)
-            if os.path.exists(docx_path):
-                with open(docx_path, "rb") as f:
-                    return f.read()
+                if os.path.exists(docx_path):
+                    with open(docx_path, "rb") as f: return f.read()
+            except Exception as e:
+                print(f"Windows DOC error: {e}")
     else:
+        # Логика для Linux (Railway) через LibreOffice
         with tempfile.TemporaryDirectory() as temp_dir:
             in_path = os.path.join(temp_dir, "temp.doc")
             with open(in_path, "wb") as f: f.write(file_bytes)
-            
-            if convert_to_pdf_linux(in_path, temp_dir):
-                # После конвертации в PDF мы не получим DOCX напрямую, 
-                # но для анализа ИИ нам хватит текста из PDF
-                pdf_path = os.path.join(temp_dir, "temp.pdf")
-                # Для упрощения в облаке: если это .doc, просто берем текст из него через PDF
-                doc = fitz.open(pdf_path)
-                text = "".join([page.get_text() for page in doc])
-                # Создаем временный docx чтобы не ломать логику дальше
-                new_docx = docx.Document()
-                new_docx.add_paragraph(text)
-                out_io = io.BytesIO()
-                new_docx.save(out_io)
-                return out_io.getvalue()
-    return file_bytes # Если ошибка - возвращаем оригинал
-    
+            try:
+                # В Linux конвертируем .doc -> .docx напрямую через soffice
+                subprocess.run(['soffice', '--headless', '--convert-to', 'docx', '--outdir', temp_dir, in_path], check=True, timeout=30)
+                out_path = os.path.join(temp_dir, "temp.docx")
+                if os.path.exists(out_path):
+                    with open(out_path, "rb") as f: return f.read()
+            except Exception as e:
+                print(f"Linux DOC error: {e}")
+    return file_bytes
 
 def get_page_count(file_bytes: bytes, filename: str) -> int:
+    """Считает количество страниц в документе"""
     ext = filename.split(".")[-1].lower()
     try:
         if ext == "pdf":
@@ -855,84 +849,38 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
             
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = os.path.join(temp_dir, f"temp.{ext}")
+            pdf_path = os.path.join(temp_dir, "temp.pdf")
             with open(file_path, "wb") as f: f.write(file_bytes)
 
-            if platform.system() == "Windows":
-                from docx2pdf import convert
-                import win32com.client
-                import pythoncom
-
+            if IS_WINDOWS:
                 if ext == "docx":
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        docx_path = os.path.abspath(os.path.join(temp_dir, "temp.docx"))
-                        pdf_path = os.path.abspath(os.path.join(temp_dir, "temp.pdf"))
-                        
-                        with open(docx_path, "wb") as f:
-                            f.write(file_bytes)
-                        
-                        convert(docx_path, pdf_path)
-                        
-                        temp_pdf = fitz.open(pdf_path)
-                        pages = temp_pdf.page_count
-                        temp_pdf.close()
-                        return pages
-                        
+                    # Используем быструю docx2pdf
+                    convert(file_path, pdf_path)
                 elif ext == "rtf":
-                    with tempfile.TemporaryDirectory() as temp_dir:
-                        # ВАЖНО: Word понимает только абсолютные пути
-                        rtf_path = os.path.abspath(os.path.join(temp_dir, "temp.rtf"))
-                        pdf_path = os.path.abspath(os.path.join(temp_dir, "temp.pdf"))
-                        
-                        with open(rtf_path, "wb") as f:
-                            f.write(file_bytes)
-                        
-                        try:
-                            # Инициализация COM-объекта (ОБЯЗАТЕЛЬНО для FastAPI)
-                            pythoncom.CoInitialize()
-                            word = win32com.client.DispatchEx("Word.Application")
-                            word.Visible = False # Прячем окно Word
-                            
-                            # Открываем RTF и сохраняем как PDF (17 = wdFormatPDF)
-                            doc = word.Documents.Open(rtf_path)
-                            doc.SaveAs(pdf_path, FileFormat=17)
-                            doc.Close(0) # 0 = не сохранять изменения
-                            word.Quit()
-                            
-                            # Читаем страницы из полученного PDF
-                            temp_pdf = fitz.open(pdf_path)
-                            pages = temp_pdf.page_count
-                            temp_pdf.close()
-                            return pages
-                            
-                        except Exception as word_err:
-                            print(f"Ошибка Word при конвертации RTF: {word_err}")
-                            # УМНЫЙ FALLBACK: Если Word упал, считаем страницы по чистому тексту
-                            raw_text = file_bytes.decode("cp1251", errors="ignore")
-                            clean_text = rtf_to_text(raw_text) # Очищаем от тяжелых тегов!
-                            return max(1, len(clean_text) // 3000)
-                    
+                    pythoncom.CoInitialize()
+                    word = win32com.client.DispatchEx("Word.Application")
+                    word.Visible = False
+                    doc = word.Documents.Open(os.path.abspath(file_path))
+                    doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17) # 17 = PDF
+                    doc.Close(0)
+                    word.Quit()
                 elif ext == "txt":
-                    # Для обычного текста эвристика работает нормально
                     return max(1, len(file_bytes) // 3000)
             else:
+                # В облаке (Linux) всё делаем через одну команду LibreOffice
                 convert_to_pdf_linux(file_path, temp_dir)
             
-            pdf_result = os.path.join(temp_dir, "temp.pdf")
-            if os.path.exists(pdf_result):
-                temp_pdf = fitz.open(pdf_result)
+            if os.path.exists(pdf_path):
+                temp_pdf = fitz.open(pdf_path)
                 pages = temp_pdf.page_count
                 temp_pdf.close()
                 return pages
-        return 1
+        
+        # Если ничего не помогло - считаем по символам
+        return max(1, len(file_bytes) // 2500)
                 
     except Exception as e:
-        print(f"Ошибка точного подсчета страниц: {e}")
-        return 1
-                
-    except Exception as e:
-        print(f"Ошибка точного подсчета страниц через Word: {e}")
-        # Если Word не установлен или произошла ошибка, 
-        # возвращаем эвристику (длина текста / 3000)
+        print(f"Ошибка подсчета страниц: {e}")
         return 1
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
