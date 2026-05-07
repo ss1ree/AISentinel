@@ -57,13 +57,13 @@ class CheckSettings(Base):
     # Умные проверки (NLP)
     check_translation = Column(Boolean, default=True)
     check_abstract = Column(Boolean, default=True)
-    check_expert = Column(Boolean, default=True)
+    check_expert = Column(Boolean, default=False)
 
     # Глобальные тумблеры инструментов
     ai_enabled = Column(Boolean, default=True)
     norm_enabled = Column(Boolean, default=True)
     feedback_enabled = Column(Boolean, default=True) # Тумблер режима обучения
-    check_apak = Column(Boolean, default=False)
+    check_apak = Column(Boolean, default=True)
 
     owner = relationship("User")
 

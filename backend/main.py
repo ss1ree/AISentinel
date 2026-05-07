@@ -78,7 +78,7 @@ def get_models():
     if semantic_model is None:
         print("Загрузка семантической модели (L6-версия)...")
         # Используем L6 вместо L12 — она гораздо легче
-        semantic_model = SentenceTransformer('sentence-transformers/paraphrase-MiniLM-L6-v2', device="cpu")
+        semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
         
     if ai_classifier is None:
         print("Загрузка классификатора ИИ с Hugging Face...")
@@ -743,9 +743,9 @@ def reset_settings(db: Session = Depends(get_db), user: database.User = Depends(
     db_settings.min_references = 3
     db_settings.check_translation = True
     db_settings.check_abstract = True
-    db_settings.check_expert = True
+    db_settings.check_expert = False
     db_settings.feedback_enabled = True
-    db_settings.check_apak = False
+    db_settings.check_apak = True
     
     db.commit()
     db.refresh(db_settings)
@@ -927,14 +927,14 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                 errors.append(f"[АПАК] Перед копирайтом нужно 2 пустые строки")
 
         # Университет (Центр, 11pt)
-        elif any(x in lower_text for x in ["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск"]):
+        elif any(x in lower_text for x in ["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "Krasnoyarsk"]):
             current_block = "university"
             alignment = "center"
             indent = "0"
             
         # Заголовки, ФИО и Научный руководитель (Центр, 12pt)
         # Если строка короткая и мы в начале документа (до аннотации) — это заголовок/ФИО
-        elif not found_abstract and (len(stripped_text) < 100 or "руководитель" in lower_text or "supervisor" in lower_text):
+        elif not found_abstract and (len(stripped_text) < 150 or any(x in lower_text for x in ["руководитель", "supervisor", "using", "platforms", "technologies"])):
             alignment = "center"
             indent = "0"
 
