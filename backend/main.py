@@ -78,7 +78,7 @@ def get_models():
     if semantic_model is None:
         print("Загрузка семантической модели (L6-версия)...")
         # Используем L6 вместо L12 — она гораздо легче
-        semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+        semantic_model = SentenceTransformer('sentence-transformers/paraphrase-MiniLM-L6-v2', device="cpu")
         
     if ai_classifier is None:
         print("Загрузка классификатора ИИ с Hugging Face...")
