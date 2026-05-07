@@ -36,6 +36,8 @@ if IS_WINDOWS:
         pass
 
 
+os.environ['TRANSFORMERS_CACHE'] = '/tmp/huggingface_cache'
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = '/tmp/sentence_transformers_cache'
 torch.set_num_threads(1)
 
 database.Base.metadata.create_all(bind=database.engine)
@@ -68,32 +70,6 @@ app.add_middleware(
 # Загружаем модель для сравнения смыслов (около 400 МБ)
 # print("Загрузка семантической модели...")
 # semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-semantic_model = None
-ai_classifier = None
-
-def get_models():
-    """Функция для получения моделей с ленивой загрузкой"""
-    global semantic_model, ai_classifier
-    
-    if semantic_model is None:
-        print("Загрузка семантической модели (L6-версия)...")
-        # Используем L6 вместо L12 — она гораздо легче
-        semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
-        
-    if ai_classifier is None:
-        print("Загрузка классификатора ИИ с Hugging Face...")
-        model_path = "ss1ree/ai-sentinel-model"
-        ai_classifier = pipeline(
-            "text-classification",
-            model=model_path,
-            tokenizer=model_path,
-            device=-1, # Force CPU
-            truncation=True,
-            max_length=512
-        )
-    return semantic_model, ai_classifier
-
-
 
 # model_path = os.path.abspath("./studying/ai_detector_model4")
 # if os.path.exists(model_path):
@@ -342,9 +318,17 @@ def clean_text_thoroughly(text: str) -> str:
     return " ".join(text.split())
 
 def run_ai_logic(text: str):
-    _, classifier = get_models()
-    if not classifier:
-        return "Disabled", 0.0, 0
+    import gc
+    # 1. Загрузка классификатора (локально внутри функции)
+    print("Эконом-загрузка детектора ИИ...")
+    model_path = "ss1ree/ai-sentinel-model"
+    classifier = pipeline(
+        "text-classification",
+        model=model_path,
+        tokenizer=model_path,
+        device=-1,
+        low_cpu_mem_usage=True
+    )
 
     # 1. Очистка текста
     clean_text = clean_text_thoroughly(text)
@@ -414,6 +398,10 @@ def run_ai_logic(text: str):
     # Порог принятия решения — 50%
     label = "AI" if final_score > 0.65 else "Human"
     
+    del classifier
+    gc.collect() # Принудительная очистка RAM
+    print("Детектор ИИ выгружен из памяти")
+
     return label, round(float(final_score), 2), len(chunks)
 
 # Функция для извлечения текста
@@ -447,8 +435,11 @@ async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
     return content
 
 def check_semantic_rules(doc, settings: database.CheckSettings):
-    sem_model, _ = get_models() 
+    import gc
+    import torch
     errors = []
+    
+    # 1. Предварительная подготовка текста (не требует памяти модели)
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     full_text_lower = "\n".join(paragraphs).lower()
 
@@ -459,51 +450,64 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     
     for i, p in enumerate(paragraphs):
         p_low = p.lower()
-        
-        # 1. Поиск организаций (университеты)
+        # Поиск организаций (университеты)
         if i < 15:
             if any(x in p_low for x in ["университет", "институт", "академия", "university", "institute", "reshetnev"]):
                 if re.search('[а-яА-Я]', p): org_ru = p
                 else: org_en = p
         
-        # 2. УМНЫЙ ПОИСК АННОТАЦИИ
-        # Ищем либо само слово "Аннотация", либо характерное начало текста
+        # Поиск аннотации
         if not abstract_text:
             if any(x in p_low for x in ["аннотация", "abstract", "в работе анализируются", "in the paper", "в статье"]):
                 abstract_text = p
-                continue # Чтобы этот же абзац не попал в main_body
-
-        # 3. Поиск основного текста (первый длинный кусок после 15-го абзаца или после аннотации)
+                continue
+        
+        # Поиск основного текста
         if len(p) > 400 and not main_body:
             main_body = p
 
-    # --- ПРОВЕРКИ ---
+    # 2. ЗАГРУЗКА МОДЕЛИ И ВЫПОЛНЕНИЕ NLP ПРОВЕРОК
+    # Используем конструкцию try...finally для гарантированной очистки памяти
+    sem_model = None
+    try:
+        # Проверяем, нужно ли вообще грузить модель
+        if settings.check_translation or settings.check_abstract:
+            print("Эконом-загрузка семантической модели...")
+            sem_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L6-v2', device="cpu")
+            
+            # А. Проверка перевода организации
+            if settings.check_translation and org_ru and org_en:
+                emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
+                emb2 = sem_model.encode(org_en, convert_to_tensor=True)
+                similarity = util.pytorch_cos_sim(emb1, emb2).item()
+                if similarity < 0.7:
+                    errors.append(f"[NLP] Перевод организации: сходство {int(similarity*100)}% (проверьте блоки RU/EN)")
+            
+            # Б. Проверка аннотации
+            if settings.check_abstract:
+                if abstract_text and main_body:
+                    emb_a = sem_model.encode(abstract_text, convert_to_tensor=True)
+                    emb_m = sem_model.encode(main_body[:1000], convert_to_tensor=True)
+                    sim = util.pytorch_cos_sim(emb_a, emb_m).item()
+                    if sim < 0.35:
+                        errors.append(f"[NLP] Аннотация: слабое соответствие теме статьи ({int(sim*100)}%)")
+                elif not abstract_text:
+                    errors.append("[NLP] Блок аннотации не найден (нет заголовка или фразы 'В работе...')")
 
-    # 1. Проверка перевода организации
-    if settings.check_translation:
-        if org_ru and org_en:
-            emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
-            emb2 = sem_model.encode(org_en, convert_to_tensor=True)
-            similarity = util.pytorch_cos_sim(emb1, emb2).item()
-            if similarity < 0.7:
-                errors.append(f"[NLP] Перевод организации: сходство {int(similarity*100)}% (проверьте блоки RU/EN)")
-        elif not org_en and not org_ru:
-            # Не считаем критической ошибкой, если это не статья с шапкой
-            pass
+    except Exception as e:
+        print(f"Ошибка в блоке семантического анализа: {e}")
+        errors.append(f"[Система] Ошибка NLP модуля")
+    
+    finally:
+        # 3. КРИТИЧЕСКИЙ ЭТАП: Полная выгрузка модели из RAM
+        if sem_model is not None:
+            print("Выгрузка семантической модели...")
+            del sem_model
+            # Чистим кэш torch и вызываем сборщик мусора Python
+            gc.collect()
+            print("Память очищена.")
 
-    # 2. Проверка аннотации
-    if settings.check_abstract:
-        if abstract_text and main_body:
-            emb_a = sem_model.encode(abstract_text, convert_to_tensor=True)
-            emb_m = sem_model.encode(main_body[:1000], convert_to_tensor=True)
-            sim = util.pytorch_cos_sim(emb_a, emb_m).item()
-            if sim < 0.35: # Порог чуть снижен для более гибкой проверки
-                errors.append(f"[NLP] Аннотация: слабое соответствие теме статьи ({int(sim*100)}%)")
-        elif not abstract_text:
-            # Если текст найден, но не помечен как аннотация
-            errors.append("[NLP] Блок аннотации не найден (нет заголовка или фразы 'В работе...')")
-
-    # 3. Экспертные заключения
+    # 4. Проверка экспертизы (простой поиск по словам, не требует нейросети)
     if settings.check_expert:
         expert_keywords = [
             "экспертное заключение", "экспортный контроль", 
