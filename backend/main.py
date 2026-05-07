@@ -752,20 +752,32 @@ def get_settings(db: Session = Depends(get_db), user: database.User = Depends(ge
 
 @app.post("/settings")
 def update_settings(new_settings: dict, db: Session = Depends(get_db), user: database.User = Depends(get_current_user)):
-    if not user: raise HTTPException(status_code=401)
+    if not user: 
+        raise HTTPException(status_code=401)
+    
+    # 1. Ищем существующие настройки
     db_settings = db.query(database.CheckSettings).filter(database.CheckSettings.owner_id == user.id).first()
     
+    # 2. Если их нет — создаем объект (но еще не сохраняем)
     if not db_settings:
         db_settings = database.CheckSettings(owner_id=user.id)
         db.add(db_settings)
 
-    # Обновляем все поля, включая новые тумблеры
+    # 3. Обновляем поля из пришедшего словаря
     for key, value in new_settings.items():
+        # Проверяем, есть ли такое поле в модели, и не пытаемся ли мы сменить ID
         if hasattr(db_settings, key) and key not in ['id', 'owner_id']:
             setattr(db_settings, key, value)
             
-    db.commit()
-    return {"message": "ok"}
+    try:
+        db.commit() # Сохраняем изменения (INSERT или UPDATE произойдет автоматически)
+        db.refresh(db_settings)
+    except Exception as e:
+        db.rollback()
+        print(f"Ошибка БД: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка при сохранении в базу данных")
+        
+    return db_settings
 
 def convert_to_pdf_linux(input_path, output_dir):
     """Универсальная конвертация в PDF через LibreOffice для Linux"""
