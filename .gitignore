@@ -26,6 +26,7 @@ build/
 ai_detector_model/
 ai_detector_model2/
 ai_detector_model3/
+ai_detector_model4/
 my_50k_dataset/
 my_split_dataset
 *.csv

@@ -61,38 +61,42 @@ app.add_middleware(
 semantic_model = None
 ai_classifier = None
 
-@app.on_event("startup")
-async def load_models():
+def get_models():
+    """Функция для получения моделей с ленивой загрузкой"""
     global semantic_model, ai_classifier
-    print("Загрузка моделей в память...")
-    # Загружаем только когда сервер уже запущен
-    semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
     
-    model_path = os.path.abspath("./studying/ai_detector_model4")
-    if os.path.exists(model_path):
+    if semantic_model is None:
+        print("Загрузка семантической модели (L6-версия)...")
+        # Используем L6 вместо L12 — она гораздо легче
+        semantic_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L6-v2', device="cpu")
+        
+    if ai_classifier is None:
+        print("Загрузка классификатора ИИ с Hugging Face...")
+        model_path = "ss1ree/ai-sentinel-model"
         ai_classifier = pipeline(
             "text-classification",
             model=model_path,
             tokenizer=model_path,
-            device=-1, # -1 заставляет использовать CPU (0 - это GPU)
+            device=-1, # Force CPU
             truncation=True,
-            max_length=512,
+            max_length=512
         )
-    print("Все модели успешно загружены!")
+    return semantic_model, ai_classifier
 
 
-model_path = os.path.abspath("./studying/ai_detector_model4")
-if os.path.exists(model_path):
-    ai_classifier = pipeline(
-        "text-classification",
-        model=model_path,
-        tokenizer=model_path,
-        device=0,
-        truncation=True,
-        max_length=512,
-    )
-else:
-    ai_classifier = None
+
+# model_path = os.path.abspath("./studying/ai_detector_model4")
+# if os.path.exists(model_path):
+#     ai_classifier = pipeline(
+#         "text-classification",
+#         model=model_path,
+#         tokenizer=model_path,
+#         device=0,
+#         truncation=True,
+#         max_length=512,
+#     )
+# else:
+#     ai_classifier = None
 
 # Настройки безопасности
 SECRET_KEY = "SUPER_SECRET_KEY_FOR_DIPLOMA"
@@ -328,7 +332,8 @@ def clean_text_thoroughly(text: str) -> str:
     return " ".join(text.split())
 
 def run_ai_logic(text: str):
-    if not ai_classifier:
+    _, classifier = get_models()
+    if not classifier:
         return "Disabled", 0.0, 0
 
     # 1. Очистка текста
@@ -359,7 +364,7 @@ def run_ai_logic(text: str):
     # 4. Анализ текста (Батчинг)
     # batch_size=8 значительно ускоряет работу модели на GPU и CPU
     try:
-        results = ai_classifier(chunks, truncation=True, max_length=512, batch_size=8)
+        results = classifier(chunks, truncation=True, max_length=512, batch_size=4)
     except Exception as e:
         print(f"Ошибка инференса классификатора: {e}")
         return "Error", 0.0, 0
