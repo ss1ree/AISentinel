@@ -473,7 +473,7 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         # Проверяем, нужно ли вообще грузить модель
         if settings.check_translation or settings.check_abstract:
             print("Эконом-загрузка семантической модели...")
-            sem_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L6-v2', device="cpu")
+            sem_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
             
             # А. Проверка перевода организации
             if settings.check_translation and org_ru and org_en:
