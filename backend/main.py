@@ -111,12 +111,12 @@ def get_db():
         db.close()
 
 def log_memory(step_name: str):
-    """Печатает текущее использование оперативной памяти"""
     mem = psutil.virtual_memory()
     used_mb = mem.used / 1024 / 1024
     total_mb = mem.total / 1024 / 1024
     percent = mem.percent
-    print(f"📊 [ПАМЯТЬ | {step_name}] Занято: {used_mb:.0f} MB из {total_mb:.0f} MB ({percent}%)")
+    # flush=True заставляет Питон выводить текст мгновенно, не дожидаясь буфера!
+    print(f"📊 [ПАМЯТЬ | {step_name}] Занято: {used_mb:.0f} MB из {total_mb:.0f} MB ({percent}%)", flush=True)
 
 # Функция получения текущего пользователя из куки
 def get_current_user(request: Request, db: Session = Depends(get_db)):
@@ -447,7 +447,7 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     sem_model = None
     try:
         if settings.check_translation or settings.check_abstract:
-            print("Эконом-загрузка L12-v2 (Zero-copy)...")
+            print("Эконом-загрузка L12-v2 (Zero-copy)...", flush=True)
             log_memory("Перед загрузкой семантической модели")
             # Загружаем L12 с флагом экономного использования CPU
             sem_model = SentenceTransformer(
@@ -472,13 +472,13 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
                     errors.append(f"[NLP] Аннотация: слабое соответствие ({int(sim*100)}%)")
                 
     except Exception as e:
-        print(f"Ошибка в блоке семантики: {e}")
+        print(f"Ошибка в блоке семантики: {e}", flush=True)
         errors.append(f"[Система] Ошибка NLP модуля")
     finally:
         if sem_model is not None:
             del sem_model
         gc.collect()
-        print("Семантическая модель L12 выгружена.")
+        print("Семантическая модель L12 выгружена.", flush=True)
 
     if settings.check_expert and not any(word in full_text_lower for word in["экспертное заключение", "экспортный контроль"]):
         errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
@@ -761,24 +761,33 @@ def update_settings(new_settings: dict, db: Session = Depends(get_db), user: dat
     return db_settings
 
 def convert_to_pdf_linux(input_path, output_dir):
-    """Конвертация через LibreOffice на Linux (Railway)"""
+    """Универсальная конвертация в PDF через LibreOffice для Linux"""
+    import subprocess
+    import os
+    import time
+    
     try:
-        # Указываем домашнюю папку для LibreOffice в /tmp (важно для Docker)
         env = os.environ.copy()
         env['HOME'] = '/tmp'
+        
+        # Запускаем LibreOffice
         subprocess.run([
             'soffice', '--headless', '--convert-to', 'pdf', 
             '--outdir', output_dir, input_path
         ], check=True, env=env, timeout=30)
         return True
     except Exception as e:
-        print(f"Ошибка LibreOffice: {e}")
+        print(f"Ошибка LibreOffice: {e}", flush=True)
         return False
     finally:
-        # ПРИНУДИТЕЛЬНО УБИВАЕМ LIBREOFFICE ЧТОБЫ ВЕРНУТЬ ПАМЯТЬ!
+        # ПРИНУДИТЕЛЬНО УБИВАЕМ ПРОЦЕССЫ И ОСВОБОЖДАЕМ ПАМЯТЬ
+        print("Убиваем LibreOffice для очистки RAM...", flush=True)
         try:
-            subprocess.run(['pkill', '-9', 'soffice.bin'])
-            subprocess.run(['pkill', '-9', 'oosplash'])
+            # Жестко завершаем все процессы soffice
+            subprocess.run(['pkill', '-9', '-f', 'soffice'], stderr=subprocess.DEVNULL)
+            subprocess.run(['pkill', '-9', '-f', 'oosplash'], stderr=subprocess.DEVNULL)
+            # Ждем 1 секунду, чтобы ОС успела освободить страницы памяти
+            time.sleep(1)
         except:
             pass
 
@@ -801,7 +810,7 @@ def convert_doc_to_docx(file_bytes: bytes) -> bytes:
                 if os.path.exists(docx_path):
                     with open(docx_path, "rb") as f: return f.read()
             except Exception as e:
-                print(f"Windows DOC error: {e}")
+                print(f"Windows DOC error: {e}", flush=True)
     else:
         # Логика для Linux (Railway) через LibreOffice
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -814,7 +823,7 @@ def convert_doc_to_docx(file_bytes: bytes) -> bytes:
                 if os.path.exists(out_path):
                     with open(out_path, "rb") as f: return f.read()
             except Exception as e:
-                print(f"Linux DOC error: {e}")
+                print(f"Linux DOC error: {e}", flush=True)
     return file_bytes
 
 def get_page_count(file_bytes: bytes, filename: str) -> int:
@@ -858,7 +867,7 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
         return max(1, len(file_bytes) // 2500)
                 
     except Exception as e:
-        print(f"Ошибка подсчета страниц: {e}")
+        print(f"Ошибка подсчета страниц: {e}", flush=True)
         return 1
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
