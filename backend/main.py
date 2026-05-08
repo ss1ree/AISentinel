@@ -320,28 +320,20 @@ def clean_text_thoroughly(text: str) -> str:
 
 def run_ai_logic(text: str):
     import gc
-    import torch
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+    from transformers import pipeline
     
-    print("Эконом-загрузка детектора ИИ...")
-    model_name = "ss1ree/ai-sentinel-model"
-    
+    print("Эконом-загрузка детектора ИИ (Zero-copy)...")
     classifier = None
-    quantized_model = None
     
     try:
-        # Загружаем с флагом low_cpu_mem_usage чтобы избежать скачков памяти
-        raw_classifier = AutoModelForSequenceClassification.from_pretrained(model_name, low_cpu_mem_usage=True)
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        # Также применяем экономный режим для вашего детектора
+        classifier = pipeline(
+            "text-classification", 
+            model="ss1ree/ai-sentinel-model", 
+            device=-1,
+            model_kwargs={"low_cpu_mem_usage": True}
+        )
         
-        # СЖИМАЕМ МОДЕЛЬ В 4 РАЗА (Квантование)
-        quantized_model = torch.quantization.quantize_dynamic(raw_classifier, {torch.nn.Linear}, dtype=torch.qint8)
-        del raw_classifier # Сразу удаляем оригинал
-        gc.collect()
-        
-        classifier = pipeline("text-classification", model=quantized_model, tokenizer=tokenizer, device=-1)
-        
-        # 1. Очистка и разбивка текста
         clean_text = clean_text_thoroughly(text)
         words = clean_text.split()
         
@@ -356,21 +348,18 @@ def run_ai_logic(text: str):
             step = len(chunks) / 100
             chunks = [chunks[int(i * step)] for i in range(100)]
 
-        # 2. Анализ
         results = classifier(chunks, truncation=True, max_length=512, batch_size=4)
         
-        ai_scores =[]
+        ai_scores = []
         for result in results:
-            # Обработка разных вариантов названия лейблов
             lbl = str(result['label']).upper()
-            is_ai = lbl in['LABEL_1', 'AI', '1', 'FAKE']
+            is_ai = lbl in ['LABEL_1', 'AI', '1', 'FAKE']
             score = result['score'] if is_ai else (1.0 - result['score'])
             ai_scores.append(score)
 
         if not ai_scores:
             return "Human", 0.0, 0
 
-        # 3. Финальная оценка (Штраф за ИИ-вставки)
         ai_chunks_count = sum(1 for s in ai_scores if s > 0.8)
         ai_ratio = ai_chunks_count / len(ai_scores)
         
@@ -378,27 +367,20 @@ def run_ai_logic(text: str):
         top_scores = sorted(ai_scores, reverse=True)[:k]
         base_score = sum(top_scores) / len(top_scores)
         
-        if ai_ratio > 0.65:
-            final_score = max(base_score, 0.75)
-        else:
-            final_score = base_score
-            
+        final_score = max(base_score, 0.75) if ai_ratio > 0.65 else base_score
         label = "AI" if final_score > 0.65 else "Human"
         
         return label, round(float(final_score), 2), len(chunks)
 
     except Exception as e:
-        print(f"Ошибка инференса классификатора: {e}")
+        print(f"Ошибка детектора ИИ: {e}")
         return "Error", 0.0, 0
         
     finally:
-        # ЖЕСТКАЯ ОЧИСТКА ПАМЯТИ
         if classifier is not None:
             del classifier
-        if quantized_model is not None:
-            del quantized_model
         gc.collect()
-        print("Детектор ИИ выгружен из памяти.")
+        print("Детектор ИИ выгружен.")
 
 # Функция для извлечения текста
 async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
@@ -436,8 +418,6 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     import re
     
     errors = []
-    
-    # 1. Сначала готовим текст
     paragraphs =[p.text.strip() for p in doc.paragraphs if p.text.strip()]
     full_text_lower = "\n".join(paragraphs).lower()
     org_ru, org_en, abstract_text, main_body = "", "", "", ""
@@ -445,7 +425,7 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     for i, p in enumerate(paragraphs):
         p_low = p.lower()
         if i < 15:
-            if any(x in p_low for x in ["университет", "институт", "academy", "university", "reshetnev"]):
+            if any(x in p_low for x in["университет", "институт", "academy", "university", "reshetnev"]):
                 if re.search('[а-яА-Я]', p): org_ru = p
                 else: org_en = p
         if not abstract_text and any(x in p_low for x in["аннотация", "abstract", "в работе", "in the paper"]):
@@ -454,20 +434,23 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if len(p) > 400 and not main_body:
             main_body = p
 
-    # 2. ЗАГРУЗКА ЛЕГКОЙ МОДЕЛИ (Весит всего 118 МБ)
     sem_model = None
     try:
         if settings.check_translation or settings.check_abstract:
-            print("Эконом-загрузка семантической модели (rubert-tiny2)...")
-            # Используем ультра-легкую модель для русского и английского
-            # sem_model = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
-            sem_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2', device="cpu")
+            print("Эконом-загрузка L12-v2 (Zero-copy)...")
+            
+            # Загружаем L12 с флагом экономного использования CPU
+            sem_model = SentenceTransformer(
+                'paraphrase-multilingual-MiniLM-L12-v2', 
+                device="cpu",
+                model_kwargs={"low_cpu_mem_usage": True}
+            )
             
             if settings.check_translation and org_ru and org_en:
                 emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
                 emb2 = sem_model.encode(org_en, convert_to_tensor=True)
                 sim = util.pytorch_cos_sim(emb1, emb2).item()
-                if sim < 0.6: # Порог для rubert-tiny2
+                if sim < 0.65:
                     errors.append(f"[NLP] Перевод организации: сходство {int(sim*100)}%")
             
             if settings.check_abstract and abstract_text and main_body:
@@ -481,13 +464,12 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         print(f"Ошибка в блоке семантики: {e}")
         errors.append(f"[Система] Ошибка NLP модуля")
     finally:
-        # УДАЛЯЕМ МОДЕЛЬ БЕЗ СЛЕДА
         if sem_model is not None:
             del sem_model
-            gc.collect()
-            print("Семантическая модель выгружена из памяти.")
+        gc.collect()
+        print("Семантическая модель L12 выгружена.")
 
-    if settings.check_expert and not any(word in full_text_lower for word in ["экспертное заключение", "экспортный контроль"]):
+    if settings.check_expert and not any(word in full_text_lower for word in["экспертное заключение", "экспортный контроль"]):
         errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
 
     return errors
@@ -1026,7 +1008,10 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
     else:
         # Для PDF или TXT просто выводим текст в теге <pre>, чтобы сохранить пробелы
         html_content = f"<div style='white-space: pre-wrap; font-family: serif;'>{text}</div>"
-
+    
+    import gc
+    gc.collect() 
+    
     # 6. Проверка на ИИ (Детектор)
     if settings.ai_enabled:
         # run_ai_logic теперь возвращает 3 параметра (без подсветки ИИ, так как мы её убрали)
