@@ -1,5 +1,5 @@
 import math
-
+import psutil
 from fastapi import FastAPI, Depends, HTTPException, Response, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -109,6 +109,14 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def log_memory(step_name: str):
+    """Печатает текущее использование оперативной памяти"""
+    mem = psutil.virtual_memory()
+    used_mb = mem.used / 1024 / 1024
+    total_mb = mem.total / 1024 / 1024
+    percent = mem.percent
+    print(f"📊 [ПАМЯТЬ | {step_name}] Занято: {used_mb:.0f} MB из {total_mb:.0f} MB ({percent}%)")
 
 # Функция получения текущего пользователя из куки
 def get_current_user(request: Request, db: Session = Depends(get_db)):
@@ -327,12 +335,14 @@ def run_ai_logic(text: str):
     
     try:
         # Также применяем экономный режим для вашего детектора
+        log_memory("Перед загрузкой Детектора ИИ")
         classifier = pipeline(
             "text-classification", 
             model="ss1ree/ai-sentinel-model", 
             device=-1,
             model_kwargs={"low_cpu_mem_usage": True}
         )
+        log_memory("После загрузки Детектора ИИ")
         
         clean_text = clean_text_thoroughly(text)
         words = clean_text.split()
@@ -438,14 +448,15 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     try:
         if settings.check_translation or settings.check_abstract:
             print("Эконом-загрузка L12-v2 (Zero-copy)...")
-            
+            log_memory("Перед загрузкой семантической модели")
             # Загружаем L12 с флагом экономного использования CPU
             sem_model = SentenceTransformer(
                 'paraphrase-multilingual-MiniLM-L12-v2', 
                 device="cpu",
                 model_kwargs={"low_cpu_mem_usage": True}
             )
-            
+            log_memory("После загрузки семантической модели")
+
             if settings.check_translation and org_ru and org_en:
                 emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
                 emb2 = sem_model.encode(org_en, convert_to_tensor=True)
@@ -763,6 +774,13 @@ def convert_to_pdf_linux(input_path, output_dir):
     except Exception as e:
         print(f"Ошибка LibreOffice: {e}")
         return False
+    finally:
+        # ПРИНУДИТЕЛЬНО УБИВАЕМ LIBREOFFICE ЧТОБЫ ВЕРНУТЬ ПАМЯТЬ!
+        try:
+            subprocess.run(['pkill', '-9', 'soffice.bin'])
+            subprocess.run(['pkill', '-9', 'oosplash'])
+        except:
+            pass
 
 def convert_doc_to_docx(file_bytes: bytes) -> bytes:
     """Конвертирует старый .doc в современный .docx"""
@@ -980,13 +998,14 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
     ext = filename.split(".")[-1].lower()
     
     # 2. Если файл .doc — незаметно превращаем его в .docx для работы парсера
+    log_memory("До конвертации DOC")
     if ext == "doc":
         converted_bytes = convert_doc_to_docx(file_bytes)
         if converted_bytes != file_bytes:
             file_bytes = converted_bytes
             ext = "docx"
             filename = filename + "x"
-    
+    log_memory("После конвертации DOC")
     # 3. Извлекаем чистый текст для ИИ-детектора
     text = await extract_text_from_file_bytes(file_bytes, filename)
     
