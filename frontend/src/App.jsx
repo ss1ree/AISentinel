@@ -294,9 +294,20 @@ function App() {
 
   const deleteHistoryItem = async (id) => {
     try {
-      await axios.delete(`${API_URL}/history/${id}`);
+      // Используйте ваш API_URL, если он у вас настроен через переменные
+      await axios.delete(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/history/${id}`);
+    } catch (e) { 
+      // Если сервер ответил 404, значит запись УЖЕ удалена (например, двойным кликом). 
+      // Просто игнорируем эту ошибку, чтобы не засорять консоль.
+      if (e.response && e.response.status === 404) {
+        console.log(`Скан #${id} уже был удален из базы.`);
+      } else {
+        console.error("Ошибка при удалении:", e); 
+      }
+    } finally {
+      // Обновляем историю в любом случае (даже если была ошибка)
       fetchHistory();
-    } catch (e) { console.error(e); }
+    }
   };
 
   const deleteAllHistory = async () => {
