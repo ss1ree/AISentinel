@@ -39,6 +39,7 @@ if IS_WINDOWS:
 os.environ['TRANSFORMERS_CACHE'] = '/tmp/huggingface_cache'
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = '/tmp/sentence_transformers_cache'
 torch.set_num_threads(1)
+torch.set_grad_enabled(False)
 
 database.Base.metadata.create_all(bind=database.engine)
 
@@ -319,97 +320,85 @@ def clean_text_thoroughly(text: str) -> str:
 
 def run_ai_logic(text: str):
     import gc
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer
-    # 1. Загрузка классификатора (локально внутри функции)
-    print("Эконом-загрузка детектора ИИ...")
-    model_name  = "ss1ree/ai-sentinel-model"
-    raw_classifier = AutoModelForSequenceClassification.from_pretrained(model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    quantized_model = torch.quantization.quantize_dynamic(raw_classifier, {torch.nn.Linear}, dtype=torch.qint8)
-
-    classifier = pipeline(
-        "text-classification",
-        model=quantized_model,
-        tokenizer=tokenizer,
-        device=-1,
-        low_cpu_mem_usage=True
-    )
-    del raw_classifier
-    gc.collect()
-
-    # 1. Очистка текста
-    clean_text = clean_text_thoroughly(text)
-    words = clean_text.split()
-
-    if not words:
-        return "Human", 0.0, 0
-
-    # 2. Улучшенное разбиение (Chunking) с ПЕРЕКРЫТИЕМ (overlap)
-    # Берем по 300 слов, перекрытие 50 слов, чтобы не разрывать смысл на стыках
-    chunk_size = 300
-    overlap = 50
+    import torch
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
     
-    chunks =[]
-    for i in range(0, len(words), chunk_size - overlap):
-        chunk = " ".join(words[i:i+chunk_size])
-        if chunk.strip():
-            chunks.append(chunk)
-
-    # 3. Защита от перегрузки для огромных диссертаций
-    # Берем равномерную выборку из 100 кусков, если текст слишком большой
-    max_chunks = 100
-    if len(chunks) > max_chunks:
-        step = len(chunks) / max_chunks
-        chunks = [chunks[int(i * step)] for i in range(max_chunks)]
-
-    # 4. Анализ текста (Батчинг)
-    # batch_size=8 значительно ускоряет работу модели на GPU и CPU
+    print("Эконом-загрузка детектора ИИ...")
+    model_name = "ss1ree/ai-sentinel-model"
+    
+    classifier = None
+    quantized_model = None
+    
     try:
+        # Загружаем с флагом low_cpu_mem_usage чтобы избежать скачков памяти
+        raw_classifier = AutoModelForSequenceClassification.from_pretrained(model_name, low_cpu_mem_usage=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # СЖИМАЕМ МОДЕЛЬ В 4 РАЗА (Квантование)
+        quantized_model = torch.quantization.quantize_dynamic(raw_classifier, {torch.nn.Linear}, dtype=torch.qint8)
+        del raw_classifier # Сразу удаляем оригинал
+        gc.collect()
+        
+        classifier = pipeline("text-classification", model=quantized_model, tokenizer=tokenizer, device=-1)
+        
+        # 1. Очистка и разбивка текста
+        clean_text = clean_text_thoroughly(text)
+        words = clean_text.split()
+        
+        if not words:
+            return "Human", 0.0, 0
+            
+        chunk_size = 300
+        overlap = 50
+        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
+        
+        if len(chunks) > 100:
+            step = len(chunks) / 100
+            chunks = [chunks[int(i * step)] for i in range(100)]
+
+        # 2. Анализ
         results = classifier(chunks, truncation=True, max_length=512, batch_size=4)
+        
+        ai_scores =[]
+        for result in results:
+            # Обработка разных вариантов названия лейблов
+            lbl = str(result['label']).upper()
+            is_ai = lbl in['LABEL_1', 'AI', '1', 'FAKE']
+            score = result['score'] if is_ai else (1.0 - result['score'])
+            ai_scores.append(score)
+
+        if not ai_scores:
+            return "Human", 0.0, 0
+
+        # 3. Финальная оценка (Штраф за ИИ-вставки)
+        ai_chunks_count = sum(1 for s in ai_scores if s > 0.8)
+        ai_ratio = ai_chunks_count / len(ai_scores)
+        
+        k = max(1, int(len(ai_scores) * 0.3))
+        top_scores = sorted(ai_scores, reverse=True)[:k]
+        base_score = sum(top_scores) / len(top_scores)
+        
+        if ai_ratio > 0.65:
+            final_score = max(base_score, 0.75)
+        else:
+            final_score = base_score
+            
+        label = "AI" if final_score > 0.65 else "Human"
+        
+        return label, round(float(final_score), 2), len(chunks)
+
     except Exception as e:
         print(f"Ошибка инференса классификатора: {e}")
         return "Error", 0.0, 0
-
-    # 5. Обработка результатов
-    ai_scores =[]
-    for result in results:
-        # Учитываем возможные варианты названия лейблов ИИ после дообучения
-        ai_labels =['LABEL_1', 'AI', '1', 'ai', 'fake']
-        is_ai = result['label'] in ai_labels
         
-        # Если модель уверена, что это ИИ - берем её score, иначе берем обратную вероятность
-        score = result['score'] if is_ai else (1.0 - result['score'])
-        ai_scores.append(score)
-
-    if not ai_scores:
-        return "Human", 0.0, 0
-
-    # 6. Продвинутая логика (Top-K + Штраф за ИИ-вставки)
-    
-    # 6.1. Считаем, какая доля текста явно сгенерирована (score > 0.8)
-    ai_chunks_count = sum(1 for s in ai_scores if s > 0.8)
-    ai_ratio = ai_chunks_count / len(ai_scores)
-    
-    # 6.2. Берем топ 30% самых подозрительных кусков (но не менее 1 куска)
-    k = max(1, int(len(ai_scores) * 0.3))
-    top_scores = sorted(ai_scores, reverse=True)[:k]
-    base_score = sum(top_scores) / len(top_scores)
-    
-    # 6.3. Финальная оценка:
-    # Если больше 65% текста явно написано нейросетью, мы жестко маркируем документ как AI
-    if ai_ratio > 0.65:
-        final_score = max(base_score, 0.75) # Ставим минимум 75% вероятности ИИ
-    else:
-        final_score = base_score
-        
-    # Порог принятия решения — 50%
-    label = "AI" if final_score > 0.65 else "Human"
-    
-    del quantized_model
-    del classifier
-    gc.collect()
-    print("Детектор ИИ выгружен.")
-    return label, round(float(final_score), 2), len(chunks)
+    finally:
+        # ЖЕСТКАЯ ОЧИСТКА ПАМЯТИ
+        if classifier is not None:
+            del classifier
+        if quantized_model is not None:
+            del quantized_model
+        gc.collect()
+        print("Детектор ИИ выгружен из памяти.")
 
 # Функция для извлечения текста
 async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
@@ -443,86 +432,62 @@ async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
 
 def check_semantic_rules(doc, settings: database.CheckSettings):
     import gc
-    import torch
+    from sentence_transformers import SentenceTransformer, util
+    import re
+    
     errors = []
     
-    # 1. Предварительная подготовка текста (не требует памяти модели)
-    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    # 1. Сначала готовим текст
+    paragraphs =[p.text.strip() for p in doc.paragraphs if p.text.strip()]
     full_text_lower = "\n".join(paragraphs).lower()
-
-    # Извлекаем блоки для анализа
-    org_ru, org_en = "", ""
-    abstract_text = ""
-    main_body = ""
+    org_ru, org_en, abstract_text, main_body = "", "", "", ""
     
     for i, p in enumerate(paragraphs):
         p_low = p.lower()
-        # Поиск организаций (университеты)
         if i < 15:
-            if any(x in p_low for x in ["университет", "институт", "академия", "university", "institute", "reshetnev"]):
+            if any(x in p_low for x in ["университет", "институт", "academy", "university", "reshetnev"]):
                 if re.search('[а-яА-Я]', p): org_ru = p
                 else: org_en = p
-        
-        # Поиск аннотации
-        if not abstract_text:
-            if any(x in p_low for x in ["аннотация", "abstract", "в работе анализируются", "in the paper", "в статье"]):
-                abstract_text = p
-                continue
-        
-        # Поиск основного текста
+        if not abstract_text and any(x in p_low for x in["аннотация", "abstract", "в работе", "in the paper"]):
+            abstract_text = p
+            continue
         if len(p) > 400 and not main_body:
             main_body = p
 
-    # 2. ЗАГРУЗКА МОДЕЛИ И ВЫПОЛНЕНИЕ NLP ПРОВЕРОК
-    # Используем конструкцию try...finally для гарантированной очистки памяти
+    # 2. ЗАГРУЗКА ЛЕГКОЙ МОДЕЛИ (Весит всего 118 МБ)
     sem_model = None
     try:
-        # Проверяем, нужно ли вообще грузить модель
         if settings.check_translation or settings.check_abstract:
-            print("Эконом-загрузка семантической модели...")
-            sem_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+            print("Эконом-загрузка семантической модели (rubert-tiny2)...")
+            # Используем ультра-легкую модель для русского и английского
+            sem_model = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
             
-            # А. Проверка перевода организации
             if settings.check_translation and org_ru and org_en:
                 emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
                 emb2 = sem_model.encode(org_en, convert_to_tensor=True)
-                similarity = util.pytorch_cos_sim(emb1, emb2).item()
-                if similarity < 0.7:
-                    errors.append(f"[NLP] Перевод организации: сходство {int(similarity*100)}% (проверьте блоки RU/EN)")
+                sim = util.pytorch_cos_sim(emb1, emb2).item()
+                if sim < 0.6: # Порог для rubert-tiny2
+                    errors.append(f"[NLP] Перевод организации: сходство {int(sim*100)}%")
             
-            # Б. Проверка аннотации
-            if settings.check_abstract:
-                if abstract_text and main_body:
-                    emb_a = sem_model.encode(abstract_text, convert_to_tensor=True)
-                    emb_m = sem_model.encode(main_body[:1000], convert_to_tensor=True)
-                    sim = util.pytorch_cos_sim(emb_a, emb_m).item()
-                    if sim < 0.35:
-                        errors.append(f"[NLP] Аннотация: слабое соответствие теме статьи ({int(sim*100)}%)")
-                elif not abstract_text:
-                    errors.append("[NLP] Блок аннотации не найден (нет заголовка или фразы 'В работе...')")
-
+            if settings.check_abstract and abstract_text and main_body:
+                emb_a = sem_model.encode(abstract_text, convert_to_tensor=True)
+                emb_m = sem_model.encode(main_body[:1000], convert_to_tensor=True)
+                sim = util.pytorch_cos_sim(emb_a, emb_m).item()
+                if sim < 0.35:
+                    errors.append(f"[NLP] Аннотация: слабое соответствие ({int(sim*100)}%)")
+                
     except Exception as e:
-        print(f"Ошибка в блоке семантического анализа: {e}")
+        print(f"Ошибка в блоке семантики: {e}")
         errors.append(f"[Система] Ошибка NLP модуля")
-    
     finally:
-        # 3. КРИТИЧЕСКИЙ ЭТАП: Полная выгрузка модели из RAM
+        # УДАЛЯЕМ МОДЕЛЬ БЕЗ СЛЕДА
         if sem_model is not None:
-            print("Выгрузка семантической модели...")
             del sem_model
-            # Чистим кэш torch и вызываем сборщик мусора Python
             gc.collect()
-            print("Память очищена.")
+            print("Семантическая модель выгружена из памяти.")
 
-    # 4. Проверка экспертизы (простой поиск по словам, не требует нейросети)
-    if settings.check_expert:
-        expert_keywords = [
-            "экспертное заключение", "экспортный контроль", 
-            "разрешение на публикацию", "сведений не содержит",
-            "open publication", "expert conclusion"
-        ]
-        if not any(word in full_text_lower for word in expert_keywords):
-            errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
+    if settings.check_expert and not any(word in full_text_lower for word in ["экспертное заключение", "экспортный контроль"]):
+        errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
 
     return errors
 
