@@ -330,12 +330,12 @@ def run_ai_logic(text: str):
     import gc
     from transformers import pipeline
     
-    print("Эконом-загрузка детектора ИИ (Zero-copy)...")
+    print("Эконом-загрузка детектора ИИ (Прямая)...", flush=True)
     classifier = None
     
     try:
-        # Также применяем экономный режим для вашего детектора
         log_memory("Перед загрузкой Детектора ИИ")
+        # Прямая загрузка без квантования (избавляет от пикового скачка RAM)
         classifier = pipeline(
             "text-classification", 
             model="ss1ree/ai-sentinel-model", 
@@ -352,7 +352,7 @@ def run_ai_logic(text: str):
             
         chunk_size = 300
         overlap = 50
-        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
+        chunks =[" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
         
         if len(chunks) > 100:
             step = len(chunks) / 100
@@ -360,10 +360,10 @@ def run_ai_logic(text: str):
 
         results = classifier(chunks, truncation=True, max_length=512, batch_size=4)
         
-        ai_scores = []
+        ai_scores =[]
         for result in results:
             lbl = str(result['label']).upper()
-            is_ai = lbl in ['LABEL_1', 'AI', '1', 'FAKE']
+            is_ai = lbl in['LABEL_1', 'AI', '1', 'FAKE']
             score = result['score'] if is_ai else (1.0 - result['score'])
             ai_scores.append(score)
 
@@ -383,14 +383,14 @@ def run_ai_logic(text: str):
         return label, round(float(final_score), 2), len(chunks)
 
     except Exception as e:
-        print(f"Ошибка детектора ИИ: {e}")
+        print(f"Ошибка детектора ИИ: {e}", flush=True)
         return "Error", 0.0, 0
         
     finally:
         if classifier is not None:
             del classifier
         gc.collect()
-        print("Детектор ИИ выгружен.")
+        print("Детектор ИИ выгружен.", flush=True)
 
 # Функция для извлечения текста
 async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
@@ -447,21 +447,20 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
     sem_model = None
     try:
         if settings.check_translation or settings.check_abstract:
-            print("Эконом-загрузка L12-v2 (Zero-copy)...", flush=True)
-            log_memory("Перед загрузкой семантической модели")
-            # Загружаем L12 с флагом экономного использования CPU
-            sem_model = SentenceTransformer(
-                'paraphrase-multilingual-MiniLM-L12-v2', 
-                device="cpu",
-                model_kwargs={"low_cpu_mem_usage": True}
-            )
-            log_memory("После загрузки семантической модели")
+            print("Загрузка семантической модели (rubert-tiny2)...", flush=True)
+            log_memory("Перед загрузкой rubert-tiny2")
+            
+            # ВАЖНО: Используем ультра-легкую модель!
+            sem_model = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+            
+            log_memory("После загрузки rubert-tiny2")
 
             if settings.check_translation and org_ru and org_en:
                 emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
                 emb2 = sem_model.encode(org_en, convert_to_tensor=True)
                 sim = util.pytorch_cos_sim(emb1, emb2).item()
-                if sim < 0.65:
+                # Порог снижен до 0.6, так как у tiny модели другое распределение векторов
+                if sim < 0.60:
                     errors.append(f"[NLP] Перевод организации: сходство {int(sim*100)}%")
             
             if settings.check_abstract and abstract_text and main_body:
@@ -478,7 +477,7 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if sem_model is not None:
             del sem_model
         gc.collect()
-        print("Семантическая модель L12 выгружена.", flush=True)
+        print("Семантическая модель выгружена.", flush=True)
 
     if settings.check_expert and not any(word in full_text_lower for word in["экспертное заключение", "экспортный контроль"]):
         errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
