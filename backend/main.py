@@ -460,7 +460,8 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if settings.check_translation or settings.check_abstract:
             print("Эконом-загрузка семантической модели (rubert-tiny2)...")
             # Используем ультра-легкую модель для русского и английского
-            sem_model = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+            # sem_model = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+            sem_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2', device="cpu")
             
             if settings.check_translation and org_ru and org_en:
                 emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
