@@ -60,7 +60,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         frontend_url,
-        "https://ai-sentinel-ppd9-chi.vercel.app", # Твой адрес из ошибки
+        r"https://ai-sentinel.*\.vercel\.app",
+        "https://ai-sentinel-ppd9-chi.vercel.app",
         "http://localhost:5173"
     ], 
     allow_credentials=True,
@@ -520,21 +521,19 @@ def login(email: str, password: str, response: Response, db: Session = Depends(g
         value=token, 
         httponly=True, 
         max_age=604800, # 7 дней
-        # Если это продакшен (Railway) -> samesite="none" и secure=True
-        # Если это локалка -> samesite="lax" и secure=False
         samesite="none" if IS_PRODUCTION else "lax",
         secure=True if IS_PRODUCTION else False,
-        domain=None 
+        domain=".railway.app" 
     )
     return {"email": user.email}
 
 @app.post("/logout")
 def logout(response: Response):
-    # При удалении куки ОБЯЗАТЕЛЬНО указываем те же параметры, что и при создании
     response.delete_cookie(
         "access_token",
         samesite="none" if IS_PRODUCTION else "lax",
         secure=True if IS_PRODUCTION else False
+        domain=".railway.app"
     )
     return {"message": "Вышли"}
 
