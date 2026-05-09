@@ -13,3 +13,4 @@ passlib[bcrypt]
 bcrypt
 safetensors
 psutil
+requests
