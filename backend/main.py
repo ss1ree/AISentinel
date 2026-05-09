@@ -990,21 +990,25 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         
         if is_bold_override:
             p_style += "font-weight: bold; "
-
+            
         if is_spacing_error:
             p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
 
         p_html = f'<p style="{p_style}">'
         
+        # ВАЖНО: Эта переменная должна быть ровно здесь, ПЕРЕД циклом runs!
+        marker_added = False 
+        
         for run in p.runs:
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
+            # Восстанавливаем маркер списка (тире)
             if is_list_item and not marker_added and t.strip():
                 if not t.strip().startswith(("–", "-", "—", "•")):
                     t = f"–    {t}"
                 marker_added = True
-
+                
             f_size = None
             has_explicit_size = False
             
@@ -1028,12 +1032,12 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            # ДОБАВЛЕНО: settings.norm_enabled
+            # Проверка шрифта (только если нормоконтроль Включен)
             if settings.norm_enabled and current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                 t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
 
-            # ДОБАВЛЕНО: settings.norm_enabled
+            # Проверка пробелов (только если нормоконтроль Включен)
             if settings.norm_enabled and settings.check_apak:
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
