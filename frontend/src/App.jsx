@@ -4,7 +4,8 @@ import html2pdf from 'html2pdf.js';
 import { 
   Search, History, ShieldCheck, AlertTriangle, Send, Activity, Eye, EyeOff,
   FileUp, FileText, LayoutDashboard, LogOut, User as UserIcon, Lock, Mail, Trash2,
-  Settings, CheckCircle2, RotateCcw, HelpCircle, Printer, Users, UserX, ServerCrash
+  Settings, CheckCircle2, RotateCcw, HelpCircle, Printer, Users, UserX, ServerCrash,
+  ChevronDown, ChevronUp, Database, ArrowUpDown
 } from 'lucide-react';
 
 // Настройка Axios для автоматической отправки куки
@@ -33,6 +34,9 @@ function App() {
   const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [adminSort, setAdminSort] = useState({ key: 'id', direction: 'asc' });
+  const [showAllAdminUsers, setShowAllAdminUsers] = useState(false);
 
   // Состояния авторизации
   const [user, setUser] = useState(null);
@@ -78,6 +82,21 @@ function App() {
       const res = await axios.get(`${API_URL}/admin/users`);
       setAdminUsers(res.data);
     } catch (e) { console.error("Ошибка загрузки пользователей", e); }
+  };
+
+  const adminClearUserHistory = async (id) => {
+    if (!window.confirm("Удалить ВСЮ историю сканов этого пользователя?")) return;
+    try {
+      await axios.delete(`http://localhost:8000/admin/users/${id}/history`);
+      fetchAdminUsers(); // Обновляем цифры в таблице
+    } catch (e) { alert("Ошибка очистки истории"); }
+  };
+
+  const toggleSort = (key) => {
+    setAdminSort(prev => ({
+      key: key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
   };
 
 
@@ -514,13 +533,6 @@ if (initializing) {
           >
             <Settings size={20} /> Настройки ГОСТ
           </button>
-          {user?.role === 'admin' && (
-            <button onClick={() => setActiveTab('admin')} className={`flex items-center gap-3 w-full p-4 mt-8 border border-amber-500/30 rounded-2xl text-left transition-all cursor-pointer ${activeTab === 'admin' ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/50' : 'hover:bg-amber-900/30 text-amber-500'}`}>
-              <Users size={20} /> Панель Админа
-            </button>
-          )}
-
-          {/* НОВОЕ: ВКЛАДКА АДМИНИСТРАТОРА */}
           {user?.role === 'admin' && (
             <button onClick={() => setActiveTab('admin')} className={`flex items-center gap-3 w-full p-4 mt-8 border border-amber-500/30 rounded-2xl text-left transition-all cursor-pointer ${activeTab === 'admin' ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/50' : 'hover:bg-amber-900/30 text-amber-500'}`}>
               <Users size={20} /> Панель Админа
@@ -998,47 +1010,110 @@ if (initializing) {
           {activeTab === 'admin' && user?.role === 'admin' && (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
               
-              <div className="bg-amber-50 rounded-[32px] p-8 border border-amber-200 flex justify-between items-center">
-                <div>
-                  <h3 className="text-amber-800 font-black text-lg uppercase flex items-center gap-2"><ShieldCheck/> Глобальное управление</h3>
-                  <p className="text-amber-700/70 font-medium text-sm mt-1">Панель администратора. Будьте осторожны с удалением данных.</p>
+              {/* ВЕРХНЯЯ ПАНЕЛЬ: ПОИСК И ГЛОБАЛЬНАЯ ОЧИСТКА */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                <div className="lg:col-span-8 relative">
+                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <input 
+                    type="text"
+                    placeholder="Поиск по email пользователя..."
+                    className="w-full pl-14 pr-6 py-5 bg-white border border-slate-200 rounded-[24px] outline-none focus:ring-4 focus:ring-blue-50 transition-all font-medium"
+                    value={adminSearch}
+                    onChange={(e) => setAdminSearch(e.target.value)}
+                  />
                 </div>
-                <button onClick={adminWipeAllHistory} className="flex items-center gap-2 px-6 py-4 bg-red-600 text-white hover:bg-red-700 rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-red-500/20 transition-all cursor-pointer">
-                  <ServerCrash size={18} /> Очистить всю БД сканов
-                </button>
+                <div className="lg:col-span-4">
+                  <button onClick={adminWipeAllHistory} className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-red-600 text-white hover:bg-red-700 rounded-[24px] font-black uppercase tracking-widest text-[10px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95">
+                    <ServerCrash size={18} /> Очистить всю БД сканов
+                  </button>
+                </div>
               </div>
 
-              <div className="bg-white rounded-[40px] shadow-sm border border-slate-200 overflow-hidden">
+              {/* ТАБЛИЦА */}
+              <div className="bg-white rounded-[32px] shadow-sm border border-slate-200 overflow-hidden">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-slate-50 border-b border-slate-100">
-                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400">ID</th>
-                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400">Пользователь</th>
-                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400">Роль</th>
-                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400">Сканирований</th>
-                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 text-right">Управление</th>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      {[
+                        { label: 'ID', key: 'id' },
+                        { label: 'Пользователь', key: 'email' },
+                        { label: 'Роль', key: 'role' },
+                        { label: 'Сканирований', key: 'scans_count' }
+                      ].map((col) => (
+                        <th 
+                          key={col.key}
+                          onClick={() => toggleSort(col.key)}
+                          className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 cursor-pointer hover:text-blue-600 transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            {col.label} <ArrowUpDown size={12} className="opacity-30" />
+                          </div>
+                        </th>
+                      ))}
+                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 text-right">Действия</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {adminUsers.map((u) => (
-                      <tr key={u.id} className="hover:bg-slate-50/50 transition-all">
-                        <td className="p-8 text-xs text-slate-400 font-mono">#{u.id}</td>
-                        <td className="p-8 font-bold text-slate-700">{u.email}</td>
-                        <td className="p-8">
-                          <span className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest ${u.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
-                            {u.role}
-                          </span>
-                        </td>
-                        <td className="p-8 font-mono text-slate-500">{u.scans_count} шт.</td>
-                        <td className="p-8 text-right">
-                          <button onClick={() => adminDeleteUser(u.id)} disabled={u.id === user.id} className={`p-2 rounded-lg transition-all ${u.id === user.id ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:bg-red-50 cursor-pointer'}`} title="Удалить пользователя">
-                            <UserX size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {adminUsers
+                      .filter(u => u.email.toLowerCase().includes(adminSearch.toLowerCase()))
+                      .sort((a, b) => {
+                        const factor = adminSort.direction === 'asc' ? 1 : -1;
+                        return a[adminSort.key] > b[adminSort.key] ? factor : -factor;
+                      })
+                      .slice(0, showAllAdminUsers ? undefined : 5)
+                      .map((u) => (
+                        <tr key={u.id} className="hover:bg-slate-50/30 transition-all group">
+                          <td className="p-8 text-xs text-slate-400 font-mono">#{u.id}</td>
+                          <td className="p-8 font-black text-slate-700">{u.email}</td>
+                          <td className="p-8">
+                            <span className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest ${u.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-8 font-mono text-slate-500">{u.scans_count} шт.</td>
+                          <td className="p-8 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => adminClearUserHistory(u.id)}
+                                className="p-3 bg-white border border-slate-100 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl cursor-pointer transition-all"
+                                title="Очистить историю пользователя"
+                              >
+                                <Database size={16} />
+                              </button>
+                              <button 
+                                onClick={() => adminDeleteUser(u.id)} 
+                                disabled={u.id === user.id} 
+                                className={`p-3 rounded-xl transition-all ${u.id === user.id ? 'opacity-20 grayscale cursor-not-allowed' : 'bg-white border border-slate-100 text-slate-400 hover:text-red-500 hover:bg-red-50 cursor-pointer'}`} 
+                                title="Удалить аккаунт"
+                              >
+                                <UserX size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
+
+                {/* КНОПКА ПОКАЗАТЬ ВСЕХ */}
+                {adminUsers.length > 5 && (
+                  <button 
+                    onClick={() => setShowAllAdminUsers(!showAllAdminUsers)}
+                    className="w-full p-6 bg-slate-50/50 border-t border-slate-100 text-[10px] font-black uppercase tracking-[3px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {showAllAdminUsers ? (
+                      <><ChevronUp size={16}/> Свернуть список</>
+                    ) : (
+                      <><ChevronDown size={16}/> Показать всех ({adminUsers.length})</>
+                    )}
+                  </button>
+                )}
+
+                {adminUsers.length === 0 && (
+                  <div className="p-32 text-center text-slate-300 font-black uppercase tracking-widest bg-white">
+                    Пользователи не найдены
+                  </div>
+                )}
               </div>
             </div>
           )}

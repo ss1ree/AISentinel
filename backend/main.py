@@ -1152,3 +1152,9 @@ def admin_wipe_all_history(db: Session = Depends(get_db), admin: database.User =
     db.query(database.DetectionResult).delete()
     db.commit()
     return {"message": "Глобальная база сканов полностью очищена"}
+
+@app.delete("/admin/users/{target_id}/history")
+def admin_clear_user_history(target_id: int, db: Session = Depends(get_db), admin: database.User = Depends(get_admin_user)):
+    db.query(database.DetectionResult).filter(database.DetectionResult.owner_id == target_id).delete()
+    db.commit()
+    return {"message": f"История пользователя #{target_id} очищена"}
