@@ -879,12 +879,11 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
-    errors =[]
+    errors = []
     html_lines =[]
     
     current_block = "header" 
     empty_lines = 0
-    found_abstract = False
     valid_single_letters =['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
 
     for p in doc.paragraphs:
@@ -916,18 +915,12 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             current_block = "copyright"
             alignment = "right"
             indent = "0"
-            # ИЗМЕНЕНИЕ: Требуем ровно 1 пустую строку
+            # ИСПРАВЛЕНО: Требуем ровно 1 пустую строку (а не 2)
             if settings.check_apak and empty_lines != 1:
                 errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
 
         # Блок Университета (11pt) - Расширенный поиск
-        elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt"]):
-            current_block = "university"
-            alignment = "center"
-            indent = "0"
-            
-        # Email обычно тоже идет к университету (11pt)
-        elif "e-mail" in lower_text or "mail.ru" in lower_text or "yandex.ru" in lower_text or "gmail.com" in lower_text:
+        elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt", "e-mail", "mail.ru", "yandex.ru", "gmail.com"]):
             current_block = "university"
             alignment = "center"
             indent = "0"
@@ -935,7 +928,6 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         # Аннотация и ключевые слова (По ширине, Курсив, 12pt)
         elif any(x in lower_text for x in["аннотация", "abstract", "ключевые слова", "keywords", "в работе", "в данной", "in the paper", "this paper", "this article"]):
             current_block = "abstract"
-            found_abstract = True
             alignment = "justify"
             indent = "0.5cm"
 
@@ -948,17 +940,18 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         else:
             # ЕСЛИ ЯВНЫХ МАРКЕРОВ НЕТ - определяем по длине строки
             is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
+            
             if is_figure_caption or has_image:
                 current_block = "figure"
                 alignment = "center"
                 indent = "0"
-            elif len(stripped_text) > 150 or current_block in ["abstract", "main"]:
-                # Длинные абзацы - это всегда основной текст (12pt)
+            elif len(stripped_text) > 120:
+                # Длинные абзацы (>120 символов) - это всегда основной текст
                 current_block = "main"
                 alignment = "justify"
                 indent = "0.5cm"
             else:
-                # Короткие строки - это Английские заголовки, ФИО и т.д. (12pt, По центру)
+                # ИСПРАВЛЕНО: Короткие строки (<120) - это Английские заголовки, ФИО и т.д.
                 current_block = "header"
                 alignment = "center"
                 indent = "0"
@@ -981,11 +974,23 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
-            f_size = run.font.size.pt if run.font.size else (p.style.font.size.pt if p.style.font.size else None)
+            # Глубокий поиск размера шрифта (даже если он спрятан в стилях Word)
+            f_size = None
+            if run.font.size:
+                f_size = run.font.size.pt
+            elif p.style.font.size:
+                f_size = p.style.font.size.pt
+            elif p.style.base_style and p.style.base_style.font.size:
+                f_size = p.style.base_style.font.size.pt
+            else:
+                try: f_size = doc.styles['Normal'].font.size.pt
+                except: pass
             
+            # Проверка размера шрифта
             if current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
-                errors.append(f"[Шрифт] Ожидался {expected_size}pt")
-                t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt'>{t}</mark>"
+                # ТЕПЕРЬ ОШИБКА ПОКАЖЕТ ТОЧНЫЙ РАЗМЕР ИЗ WORD
+                errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
+                t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
 
             if settings.check_apak:
                 # Двойные пробелы
