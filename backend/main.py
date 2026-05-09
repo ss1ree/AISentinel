@@ -1,4 +1,4 @@
-import math
+# import math
 import psutil
 from fastapi import FastAPI, Depends, HTTPException, Response, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,12 +12,12 @@ import io
 from docx import Document
 import fitz  # PyMuPDF
 import bcrypt
-from sentence_transformers import SentenceTransformer, util
+# from sentence_transformers import SentenceTransformer, util
 import re
 import tempfile
 import os
 # import json
-from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
+# from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
 import csv
 # import ollama
 import torch
@@ -206,29 +206,38 @@ def check_formatting(file_bytes, settings: database.CheckSettings):
     
     return errors
 
-ppl_model_name = "gpt2"
+# gpt2_tokenizer = None
+# gpt2_model = None
 
-ppl_tokenizer = AutoTokenizer.from_pretrained(ppl_model_name)
-ppl_model = AutoModelForCausalLM.from_pretrained(ppl_model_name)
+# def get_gpt2_models():
+#     """Ленивая загрузка GPT-2 только при необходимости"""
+#     global gpt2_tokenizer, gpt2_model
+#     if gpt2_tokenizer is None or gpt2_model is None:
+#         print("Эконом-загрузка GPT-2 для перплексии...", flush=True)
+#         model_name = "gpt2"
+#         gpt2_tokenizer = AutoTokenizer.from_pretrained(model_name)
+#         # low_cpu_mem_usage=True помогает не раздувать память при загрузке
+#         gpt2_model = AutoModelForCausalLM.from_pretrained(model_name, low_cpu_mem_usage=True)
+#     return gpt2_tokenizer, gpt2_model
 
-def calculate_perplexity(text):
+# def calculate_perplexity(text):
+#     tokenizer, model = get_gpt2_models()
+#     encodings = tokenizer(
+#         text,
+#         return_tensors="pt",
+#         truncation=True,
+#         max_length=1024
+#     )
 
-    encodings = ppl_tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        max_length=1024
-    )
+#     input_ids = encodings.input_ids
 
-    input_ids = encodings.input_ids
+#     with torch.no_grad():
+#         outputs = model(input_ids, labels=input_ids)
 
-    with torch.no_grad():
-        outputs = ppl_model(input_ids, labels=input_ids)
+#     loss = outputs.loss.item()   # tensor → float
+#     perplexity = math.exp(loss)  # float
 
-    loss = outputs.loss.item()   # tensor → float
-    perplexity = math.exp(loss)  # float
-
-    return perplexity
+#     return perplexity
 
 def split_into_chunks(text, chunk_size=4000):
 
