@@ -51,20 +51,22 @@ function App() {
   // 1. Проверка текущей сессии при загрузке
   useEffect(() => {
     const checkSession = async () => {
-      if (!navigator.cookieEnabled) {
-        setShowCookieWarning(true);
-      }
       try {
-        const res = await axios.get(`${API_URL}/me`);
-        if (res.data && res.data.email) {
-          setUser(res.data);
-          await fetchSettings();
-          await fetchHistory();
-        }
+        // Проверка через запрос к бэкенду
+        await axios.get(`${API_URL}/me`);
+        // Если дошли сюда и всё ок — всё хорошо
+        setUser(res.data);
+        await fetchSettings();
+        await fetchHistory();
       } catch (err) {
+        // ЕСЛИ ОШИБКА 401/403, значит мы не авторизованы или кука не записалась
         setUser(null);
+        
+        // Добавляем проверку на "выкидывание": 
+        // Если мы точно знаем, что была попытка логина, но куки нет
+        // Или просто показываем предупреждение, если не удалось получить сессию
+        setShowCookieWarning(true); 
       } finally {
-        // Самое важное: отключаем экран загрузки в любом случае
         setInitializing(false);
       }
     };
