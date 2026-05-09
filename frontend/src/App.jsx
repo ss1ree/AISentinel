@@ -151,20 +151,24 @@ function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     const url = authMode === 'login' ? 'login' : 'register';
-    const triggerCookieWarning = () => {
-      if (navigator.userAgent.includes("YaBrowser") || navigator.userAgent.includes("Safari")) {
-        setShowCookieWarning(true);
-      }
-    };
-    
     try {
       const res = await axios.post(`${API_URL}/${url}?email=${email}&password=${password}`);
+      
       if (res.data.error) {
         alert(res.data.error);
       } else {
         if (authMode === 'login') {
-          setUser({ email });
-          fetchHistory();
+          // Сохраняем ВЕСЬ ответ сервера (там теперь есть и email, и role)
+          setUser(res.data); 
+          
+          // Загружаем настройки и историю
+          await fetchSettings();
+          await fetchHistory();
+          
+          // Опционально: если зашел админ, сразу подгружаем список юзеров
+          if (res.data.role === 'admin') {
+            fetchAdminUsers();
+          }
         } else {
           alert("Регистрация успешна! Теперь войдите.");
           setAuthMode('login');

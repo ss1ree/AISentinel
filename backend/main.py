@@ -534,7 +534,7 @@ def login(email: str, password: str, response: Response, db: Session = Depends(g
         secure=True if IS_PRODUCTION else False,
         domain=None
     )
-    return {"email": user.email}
+    return {"email": user.email, "role": user.role }
 
 @app.post("/logout")
 def logout(response: Response):
