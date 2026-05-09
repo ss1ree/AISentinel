@@ -879,13 +879,13 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
-    errors = []
-    html_lines = []
+    errors =[]
+    html_lines =[]
     
     current_block = "header" 
     empty_lines = 0
     found_abstract = False
-    valid_single_letters = ['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
+    valid_single_letters =['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
 
     for p in doc.paragraphs:
         raw_text = p.text.replace('\t', '    ').replace('\x0c', '')
@@ -901,61 +901,75 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             
         lower_text = stripped_text.lower()
         
-        # --- 1. ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
-        alignment = "justify" # По умолчанию (основной текст, аннотация, источники)
-        indent = "0.5cm"      # По умолчанию для текста
+        # --- 1. УМНОЕ ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
+        alignment = "justify" 
+        indent = "0.5cm"      
         
-        # УДК (Всегда слева, 12pt)
-        if lower_text.startswith("удк"):
+        # УДК (Всегда слева)
+        if lower_text.startswith("удк") or lower_text.startswith("udc"):
             current_block = "header"
             alignment = "left"
             indent = "0"
 
-        # Копирайт (Всегда справа, 12pt)
+        # Копирайт (Всегда справа)
         elif "©" in lower_text or "(c)" in lower_text:
             current_block = "copyright"
             alignment = "right"
             indent = "0"
-            if settings.check_apak and empty_lines != 2:
-                errors.append(f"[АПАК] Перед копирайтом нужно 2 пустые строки")
+            # ИЗМЕНЕНИЕ: Требуем ровно 1 пустую строку
+            if settings.check_apak and empty_lines != 1:
+                errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
 
-        # Университет (Центр, 11pt)
-        elif any(x in lower_text for x in ["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "Krasnoyarsk"]):
+        # Блок Университета (11pt) - Расширенный поиск
+        elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt"]):
             current_block = "university"
             alignment = "center"
             indent = "0"
             
-        # Заголовки, ФИО и Научный руководитель (Центр, 12pt)
-        # Если строка короткая и мы в начале документа (до аннотации) — это заголовок/ФИО
-        elif not found_abstract and (len(stripped_text) < 150 or any(x in lower_text for x in ["руководитель", "supervisor", "using", "platforms", "technologies"])):
+        # Email обычно тоже идет к университету (11pt)
+        elif "e-mail" in lower_text or "mail.ru" in lower_text or "yandex.ru" in lower_text or "gmail.com" in lower_text:
+            current_block = "university"
             alignment = "center"
             indent = "0"
 
         # Аннотация и ключевые слова (По ширине, Курсив, 12pt)
-        elif any(x in lower_text for x in ["аннотация", "abstract", "ключевые слова", "keywords", "в работе", "in the paper"]):
+        elif any(x in lower_text for x in["аннотация", "abstract", "ключевые слова", "keywords", "в работе", "в данной", "in the paper", "this paper", "this article"]):
             current_block = "abstract"
             found_abstract = True
             alignment = "justify"
             indent = "0.5cm"
 
-        # Библиографический заголовок (Центр, 12pt)
+        # Библиографический заголовок
         elif "библиографическ" in lower_text or "литература" in lower_text:
             current_block = "references"
             alignment = "center"
             indent = "0"
 
-        # Рисунки (Центр)
-        is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
-        if is_figure_caption or has_image:
-            alignment = "center"
-            indent = "0"
+        else:
+            # ЕСЛИ ЯВНЫХ МАРКЕРОВ НЕТ - определяем по длине строки
+            is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
+            if is_figure_caption or has_image:
+                current_block = "figure"
+                alignment = "center"
+                indent = "0"
+            elif len(stripped_text) > 150 or current_block in ["abstract", "main"]:
+                # Длинные абзацы - это всегда основной текст (12pt)
+                current_block = "main"
+                alignment = "justify"
+                indent = "0.5cm"
+            else:
+                # Короткие строки - это Английские заголовки, ФИО и т.д. (12pt, По центру)
+                current_block = "header"
+                alignment = "center"
+                indent = "0"
 
         # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
+        # 11pt только для университета и email, остальное - 12pt
         expected_size = 11 if current_block == "university" else 12
         empty_lines = 0
 
         # --- 3. СТИЛЬ АБЗАЦА ---
-        p_style = f"margin: 0; line-height: 1.0; white-space: pre-wrap; vertical-align: baseline; "
+        p_style = f"margin: 0; line-height: 1.0; white-space: pre-wrap; vertical-align: baseline; font-family: 'Times New Roman', serif; "
         p_style += f"text-align: {alignment}; text-indent: {indent}; "
         
         if current_block == "abstract":
@@ -967,17 +981,17 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
-            # Проверка шрифта
             f_size = run.font.size.pt if run.font.size else (p.style.font.size.pt if p.style.font.size else None)
-            if not is_figure_caption and f_size and abs(round(f_size) - expected_size) > 0.1:
+            
+            if current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt")
-                t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;'>{t}</mark>"
+                t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt'>{t}</mark>"
 
-            # Типографика (пробелы)
             if settings.check_apak:
+                # Двойные пробелы
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
-                    t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;'>  </span>")
+                    t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
 
                 # Разрыв слов
                 def sub_standalone(m):
