@@ -532,7 +532,7 @@ def login(email: str, password: str, response: Response, db: Session = Depends(g
         max_age=604800, # 7 дней
         samesite="none" if IS_PRODUCTION else "lax",
         secure=True if IS_PRODUCTION else False,
-        domain=".railway.app" 
+        domain=None
     )
     return {"email": user.email}
 
@@ -542,14 +542,14 @@ def logout(response: Response):
         "access_token",
         samesite="none" if IS_PRODUCTION else "lax",
         secure=True if IS_PRODUCTION else False,
-        domain=".railway.app"
+        domain=None
     )
     return {"message": "Вышли"}
 
 @app.get("/me")
 def me(user: database.User = Depends(get_current_user)):
     if not user: return {"error": "Not logged in"}
-    return {"email": user.email}
+    return {"email": user.email, "role": user.role}
 
 @app.get("/")
 def home():
