@@ -889,7 +889,7 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
-    errors = []
+    errors =[]
     html_lines =[]
     
     current_block = "header" 
@@ -917,7 +917,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         alignment = "justify" 
         indent = "1.25cm" # Стандартный абзацный отступ ГОСТ
         is_bold_override = False
-        
+        is_spacing_error = False
         is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
         
         # 1. УДК (Слева)
@@ -933,7 +933,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             indent = "0"
             if settings.check_apak and empty_lines != 1:
                 errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
-                
+                is_spacing_error = True # <-- НОВОЕ: включаем подсветку
+
         # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
         elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
             current_block = "references_header"
@@ -948,7 +949,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             alignment = "justify"
             indent = "0" 
             
-        # 5. Аннотация и ключевые слова (По центру, как просил)
+        # 5. Аннотация и ключевые слова (По центру)
         elif lower_text.startswith("аннотация") or lower_text.startswith("abstract") or lower_text.startswith("ключевые слова") or lower_text.startswith("keywords"):
             current_block = "abstract"
             alignment = "center"
@@ -986,11 +987,13 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         p_style = f"margin: 0; line-height: 1.5; white-space: pre-wrap; vertical-align: baseline; font-family: 'Times New Roman', serif; "
         p_style += f"text-align: {alignment}; text-indent: {indent}; "
         
-        # Если это заголовок библиографии, принудительно делаем его жирным
         if is_bold_override:
             p_style += "font-weight: bold; "
 
-        p_html = f"<p style='{p_style}'>"
+        if is_spacing_error:
+            p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
+            
+        p_html = f'<p style="{p_style}">'
         
         for run in p.runs:
             if not run.text: continue
@@ -999,7 +1002,6 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             f_size = None
             has_explicit_size = False
             
-            # Глубокий поиск размера шрифта
             if run.font and run.font.size:
                 f_size = run.font.size.pt
                 has_explicit_size = True
@@ -1017,11 +1019,9 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                         f_size = doc.styles['Normal'].font.size.pt
                 except: pass
             
-            # Прощаем 11 шрифт, если он унаследован скрыто
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            # Проверка соответствия размера
             if current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                 t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
