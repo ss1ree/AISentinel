@@ -338,19 +338,24 @@ def clean_text_thoroughly(text: str) -> str:
 
 def run_ai_logic(text: str):
     import gc
+    import torch
     from transformers import pipeline
     
-    print("Эконом-загрузка детектора ИИ (Прямая)...", flush=True)
+    print("Эконом-загрузка детектора ИИ (16-bit)...", flush=True)
     classifier = None
     
     try:
         log_memory("Перед загрузкой Детектора ИИ")
-        # Прямая загрузка без квантования (избавляет от пикового скачка RAM)
+        
+        # ЗАГРУЖАЕМ В 16-БИТНОМ РЕЖИМЕ (Сжимает RAM в 2 раза!)
         classifier = pipeline(
             "text-classification", 
             model="ss1ree/ai-sentinel-model", 
             device=-1,
-            model_kwargs={"low_cpu_mem_usage": True}
+            model_kwargs={
+                "low_cpu_mem_usage": True,
+                "torch_dtype": torch.bfloat16 # Магическая строка для экономии памяти
+            }
         )
         log_memory("После загрузки Детектора ИИ")
         
