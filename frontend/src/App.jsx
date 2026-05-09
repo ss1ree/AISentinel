@@ -346,9 +346,15 @@ function App() {
   const deleteAllHistory = async () => {
     if (!window.confirm("Вы уверены, что хотите удалить ВСЮ свою историю?")) return;
     try {
-      await axios.delete(`${API_URL}/history/all`);
-      fetchHistory();
-    } catch (e) { console.error(e); }
+      // Явно берем URL из переменной окружения
+      const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      await axios.delete(`${BASE_URL}/history/all`);
+      setHistory([]); // Мгновенно очищаем локально
+      setResult(null);
+    } catch (e) { 
+      console.error("Ошибка очистки:", e); 
+      alert("Не удалось очистить историю");
+    }
   };
 
   const adminDeleteUser = async (id) => {
@@ -362,10 +368,13 @@ function App() {
   const adminWipeAllHistory = async () => {
     if (!window.confirm("ВНИМАНИЕ! Это удалит историю ВСЕХ пользователей. Продолжить?")) return;
     try {
-      await axios.delete(`${API_URL}/admin/history/wipe-all`);
+      const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      await axios.delete(`${BASE_URL}/admin/history/wipe-all`);
+      fetchAdminUsers(); // Обновляем цифры в таблице
       alert("Глобальная база очищена.");
-      fetchAdminUsers();
-    } catch (e) { alert("Ошибка очистки"); }
+    } catch (e) { 
+      alert("Ошибка доступа или сервера"); 
+    }
   };
 
   // --- ЭКРАН ЗАГРУЗКИ (чтобы не мелькал логин) ---
@@ -1010,113 +1019,113 @@ if (initializing) {
             </div>
           )}
 
-          {/* --- ВКЛАДКА: АДМИН-ПАНЕЛЬ --- */}
           {activeTab === 'admin' && user?.role === 'admin' && (
-            <div className="space-y-8 animate-in slide-in-from-right-4 duration-500">
+            <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
               
               {/* ВЕРХНЯЯ ПАНЕЛЬ: ПОИСК И ГЛОБАЛЬНАЯ ОЧИСТКА */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
                 <div className="lg:col-span-8 relative">
-                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Search size={22} />
+                  </div>
                   <input 
                     type="text"
                     placeholder="Поиск по email пользователя..."
-                    className="w-full pl-14 pr-6 py-5 bg-white border border-slate-200 rounded-[24px] outline-none focus:ring-4 focus:ring-blue-50 transition-all font-medium"
+                    className="w-full pl-16 pr-8 py-6 bg-white border border-slate-200 rounded-[32px] outline-none focus:ring-4 focus:ring-blue-100/50 transition-all font-bold text-slate-700 shadow-sm"
                     value={adminSearch}
                     onChange={(e) => setAdminSearch(e.target.value)}
                   />
                 </div>
                 <div className="lg:col-span-4">
-                  <button onClick={adminWipeAllHistory} className="w-full flex items-center justify-center gap-3 px-6 py-5 bg-red-600 text-white hover:bg-red-700 rounded-[24px] font-black uppercase tracking-widest text-[10px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95">
-                    <ServerCrash size={18} /> Очистить всю БД сканов
+                  <button 
+                    onClick={adminWipeAllHistory} 
+                    className="w-full flex items-center justify-center gap-3 px-8 py-6 bg-red-600 text-white hover:bg-red-700 rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95"
+                  >
+                    <ServerCrash size={20} /> Очистить базу сканов
                   </button>
                 </div>
               </div>
 
-              {/* ТАБЛИЦА */}
+              {/* ТАБЛИЦА ПОЛЬЗОВАТЕЛЕЙ */}
               <div className="bg-white rounded-[32px] shadow-sm border border-slate-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50/50 border-b border-slate-100">
-                      {[
-                        { label: 'ID', key: 'id' },
-                        { label: 'Пользователь', key: 'email' },
-                        { label: 'Роль', key: 'role' },
-                        { label: 'Сканирований', key: 'scans_count' }
-                      ].map((col) => (
-                        <th 
-                          key={col.key}
-                          onClick={() => toggleSort(col.key)}
-                          className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 cursor-pointer hover:text-blue-600 transition-colors"
-                        >
-                          <div className="flex items-center gap-2">
-                            {col.label} <ArrowUpDown size={12} className="opacity-30" />
-                          </div>
-                        </th>
-                      ))}
-                      <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 text-right">Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {adminUsers
-                      .filter(u => u.email.toLowerCase().includes(adminSearch.toLowerCase()))
-                      .sort((a, b) => {
-                        const factor = adminSort.direction === 'asc' ? 1 : -1;
-                        return a[adminSort.key] > b[adminSort.key] ? factor : -factor;
-                      })
-                      .slice(0, showAllAdminUsers ? undefined : 5)
-                      .map((u) => (
-                        <tr key={u.id} className="hover:bg-slate-50/30 transition-all group">
-                          <td className="p-8 text-xs text-slate-400 font-mono">#{u.id}</td>
-                          <td className="p-8 font-black text-slate-700">{u.email}</td>
-                          <td className="p-8">
-                            <span className={`px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest ${u.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="p-8 font-mono text-slate-500">{u.scans_count} шт.</td>
-                          <td className="p-8 text-right">
-                            <div className="flex justify-end gap-2">
-                              <button 
-                                onClick={() => adminClearUserHistory(u.id)}
-                                className="p-3 bg-white border border-slate-100 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl cursor-pointer transition-all"
-                                title="Очистить историю пользователя"
-                              >
-                                <Database size={16} />
-                              </button>
-                              <button 
-                                onClick={() => adminDeleteUser(u.id)} 
-                                disabled={u.id === user.id} 
-                                className={`p-3 rounded-xl transition-all ${u.id === user.id ? 'opacity-20 grayscale cursor-not-allowed' : 'bg-white border border-slate-100 text-slate-400 hover:text-red-500 hover:bg-red-50 cursor-pointer'}`} 
-                                title="Удалить аккаунт"
-                              >
-                                <UserX size={16} />
-                              </button>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/50 border-b border-slate-100">
+                        {[
+                          { label: 'ID', key: 'id' },
+                          { label: 'Пользователь', key: 'email' },
+                          { label: 'Роль', key: 'role' },
+                          { label: 'Сканирований', key: 'scans_count' }
+                        ].map((col) => (
+                          <th 
+                            key={col.key}
+                            onClick={() => toggleSort(col.key)}
+                            className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 cursor-pointer hover:text-blue-600 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              {col.label} <ArrowUpDown size={12} className="opacity-30" />
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+                          </th>
+                        ))}
+                        <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 text-right">Управление</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {adminUsers
+                        .filter(u => u.email.toLowerCase().includes(adminSearch.toLowerCase()))
+                        .sort((a, b) => {
+                          const factor = adminSort.direction === 'asc' ? 1 : -1;
+                          return a[adminSort.key] > b[adminSort.key] ? factor : -factor;
+                        })
+                        .slice(0, showAllAdminUsers ? undefined : 5)
+                        .map((u) => (
+                          <tr key={u.id} className="hover:bg-slate-50/30 transition-all group">
+                            <td className="p-8 text-xs text-slate-400 font-mono">#{u.id}</td>
+                            <td className="p-8 font-black text-slate-800">{u.email}</td>
+                            <td className="p-8">
+                              <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${u.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
+                                {u.role}
+                              </span>
+                            </td>
+                            <td className="p-8 font-mono text-slate-500 font-bold">{u.scans_count} шт.</td>
+                            <td className="p-8 text-right">
+                              <div className="flex justify-end gap-3">
+                                <button 
+                                  onClick={() => adminClearUserHistory(u.id)}
+                                  className="p-3 bg-white border border-slate-100 text-slate-300 hover:text-amber-600 hover:bg-amber-50 rounded-2xl cursor-pointer transition-all active:scale-90"
+                                  title="Очистить сканы"
+                                >
+                                  <Database size={18} />
+                                </button>
+                                <button 
+                                  onClick={() => adminDeleteUser(u.id)} 
+                                  disabled={u.id === user.id} 
+                                  className={`p-3 rounded-2xl transition-all ${u.id === user.id ? 'opacity-10 grayscale cursor-not-allowed' : 'bg-white border border-slate-100 text-slate-300 hover:text-red-500 hover:bg-red-50 cursor-pointer active:scale-90'}`} 
+                                  title="Удалить аккаунт"
+                                >
+                                  <UserX size={18} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
 
-                {/* КНОПКА ПОКАЗАТЬ ВСЕХ */}
+                {/* КНОПКА РАСКРЫТИЯ */}
                 {adminUsers.length > 5 && (
                   <button 
                     onClick={() => setShowAllAdminUsers(!showAllAdminUsers)}
-                    className="w-full p-6 bg-slate-50/50 border-t border-slate-100 text-[10px] font-black uppercase tracking-[3px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full p-8 bg-slate-50/50 border-t border-slate-100 text-[10px] font-black uppercase tracking-[3px] text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all flex items-center justify-center gap-3 cursor-pointer"
                   >
                     {showAllAdminUsers ? (
-                      <><ChevronUp size={16}/> Свернуть список</>
+                      <><ChevronUp size={18}/> Свернуть список</>
                     ) : (
-                      <><ChevronDown size={16}/> Показать всех ({adminUsers.length})</>
+                      <><ChevronDown size={18}/> Показать всех пользователей ({adminUsers.length})</>
                     )}
                   </button>
-                )}
-
-                {adminUsers.length === 0 && (
-                  <div className="p-32 text-center text-slate-300 font-black uppercase tracking-widest bg-white">
-                    Пользователи не найдены
-                  </div>
                 )}
               </div>
             </div>
