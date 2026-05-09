@@ -889,12 +889,15 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
-    errors =[]
+    errors = []
     html_lines =[]
     
     current_block = "header" 
     empty_lines = 0
     valid_single_letters =['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
+    
+    # Флаг: вошли ли мы в секцию библиографии
+    in_references_section = False
 
     for p in doc.paragraphs:
         raw_text = p.text.replace('\t', '    ').replace('\x0c', '')
@@ -912,56 +915,80 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         
         # --- 1. УМНОЕ ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
         alignment = "justify" 
-        indent = "0.5cm"      
+        indent = "1.25cm" # Стандартный абзацный отступ ГОСТ
+        is_bold_override = False
         
+        is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
+        
+        # 1. УДК (Слева)
         if lower_text.startswith("удк") or lower_text.startswith("udc"):
-            current_block = "header"
+            current_block = "udk"
             alignment = "left"
             indent = "0"
+            
+        # 2. Копирайт (Справа)
         elif "©" in lower_text or "(c)" in lower_text:
             current_block = "copyright"
             alignment = "right"
             indent = "0"
             if settings.check_apak and empty_lines != 1:
                 errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
+                
+        # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
+        elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
+            current_block = "references_header"
+            alignment = "center"
+            indent = "0"
+            in_references_section = True
+            is_bold_override = True # Принудительно делаем жирным
+            
+        # 4. Если мы вошли в секцию ссылок, то сами ссылки по ширине без отступа
+        elif in_references_section:
+            current_block = "reference_item"
+            alignment = "justify"
+            indent = "0" 
+            
+        # 5. Аннотация и ключевые слова (По центру, как просил)
+        elif lower_text.startswith("аннотация") or lower_text.startswith("abstract") or lower_text.startswith("ключевые слова") or lower_text.startswith("keywords"):
+            current_block = "abstract"
+            alignment = "center"
+            indent = "0"
+            
+        # 6. Картинки и подписи (По центру)
+        elif is_figure_caption or has_image:
+            current_block = "figure"
+            alignment = "center"
+            indent = "0"
+            
+        # 7. Университет / Email (По центру)
         elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt", "e-mail", "mail.ru", "yandex.ru", "gmail.com"]):
             current_block = "university"
             alignment = "center"
             indent = "0"
-        elif any(x in lower_text for x in["аннотация", "abstract", "ключевые слова", "keywords", "в работе", "в данной", "in the paper", "this paper", "this article"]):
-            current_block = "abstract"
-            alignment = "justify"
-            indent = "0.5cm"
-        elif "библиографическ" in lower_text or "литература" in lower_text:
-            current_block = "references"
+            
+        # 8. ФИО, Руководитель, Название статьи, Заголовки (Всё короткое -> По центру)
+        elif len(stripped_text) < 100:
+            current_block = "heading_or_title"
             alignment = "center"
             indent = "0"
+            
+        # 9. Основной длинный текст (По ширине - Justify)
         else:
-            is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
-            if is_figure_caption or has_image:
-                current_block = "figure"
-                alignment = "center"
-                indent = "0"
-            elif len(stripped_text) > 120:
-                current_block = "main"
-                alignment = "justify"
-                indent = "0.5cm"
-            else:
-                current_block = "header"
-                alignment = "center"
-                indent = "0"
+            current_block = "main"
+            alignment = "justify"
+            indent = "1.25cm"
 
         # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
-        # ИСПРАВЛЕНО: Берем ожидаемый размер текста из настроек пользователя (settings.font_size)
         expected_size = 11 if current_block == "university" else settings.font_size
         empty_lines = 0
 
         # --- 3. СТИЛЬ АБЗАЦА ---
-        p_style = f"margin: 0; line-height: 1.0; white-space: pre-wrap; vertical-align: baseline; font-family: 'Times New Roman', serif; "
+        p_style = f"margin: 0; line-height: 1.5; white-space: pre-wrap; vertical-align: baseline; font-family: 'Times New Roman', serif; "
         p_style += f"text-align: {alignment}; text-indent: {indent}; "
         
-        if current_block == "abstract":
-            p_style += "font-style: italic; "
+        # Если это заголовок библиографии, принудительно делаем его жирным
+        if is_bold_override:
+            p_style += "font-weight: bold; "
 
         p_html = f"<p style='{p_style}'>"
         
@@ -969,10 +996,10 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
-            # --- ИСПРАВЛЕННЫЙ ПОИСК РАЗМЕРА ШРИФТА ---
             f_size = None
-            has_explicit_size = False # Флаг: задал ли пользователь размер руками
+            has_explicit_size = False
             
+            # Глубокий поиск размера шрифта
             if run.font and run.font.size:
                 f_size = run.font.size.pt
                 has_explicit_size = True
@@ -990,13 +1017,11 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                         f_size = doc.styles['Normal'].font.size.pt
                 except: pass
             
-            # ХАК: Обход системного поведения python-docx
-            # Если размер явно не задан руками (has_explicit_size=False), библиотека достает 11pt из 
-            # системного шаблона Normal, хотя в самом Word текст выглядит как 12/14pt. Мы это прощаем.
+            # Прощаем 11 шрифт, если он унаследован скрыто
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            # Проверка размера шрифта
+            # Проверка соответствия размера
             if current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                 t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
