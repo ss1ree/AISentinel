@@ -337,28 +337,14 @@ def clean_text_thoroughly(text: str) -> str:
     return " ".join(text.split())
 
 def run_ai_logic(text: str):
-    import gc
-    import torch
-    from transformers import pipeline
+    import os
+    import requests
+    import json
     
-    print("Эконом-загрузка детектора ИИ (16-bit)...", flush=True)
-    classifier = None
+    print("🚀 Запуск детектора ИИ через Облачный API (0 MB RAM)...", flush=True)
     
     try:
-        log_memory("Перед загрузкой Детектора ИИ")
-        
-        # ЗАГРУЖАЕМ В 16-БИТНОМ РЕЖИМЕ (Сжимает RAM в 2 раза!)
-        classifier = pipeline(
-            "text-classification", 
-            model="ss1ree/ai-sentinel-model", 
-            device=-1,
-            model_kwargs={
-                "low_cpu_mem_usage": True,
-                "torch_dtype": torch.bfloat16 # Магическая строка для экономии памяти
-            }
-        )
-        log_memory("После загрузки Детектора ИИ")
-        
+        # 1. Очистка и разбивка текста
         clean_text = clean_text_thoroughly(text)
         words = clean_text.split()
         
@@ -367,24 +353,48 @@ def run_ai_logic(text: str):
             
         chunk_size = 300
         overlap = 50
-        chunks =[" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
+        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
         
-        if len(chunks) > 100:
-            step = len(chunks) / 100
-            chunks = [chunks[int(i * step)] for i in range(100)]
+        # Для API берем максимум 10 равномерных чанков, чтобы не спамить сервер
+        if len(chunks) > 10:
+            step = len(chunks) / 10
+            chunks = [chunks[int(i * step)] for i in range(10)]
 
-        results = classifier(chunks, truncation=True, max_length=512, batch_size=4)
+        # 2. Обращение к API Hugging Face
+        API_URL = "https://api-inference.huggingface.co/models/ss1ree/ai-sentinel-model"
         
+        hf_token = os.getenv("HF_TOKEN", "")
+        headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+        
+        # Отправляем весь массив кусков за 1 запрос
+        payload = {
+            "inputs": chunks,
+            "options": {"wait_for_model": True} # Ждем загрузки, если модель "спит"
+        }
+
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        
+        if response.status_code != 200:
+            print(f"Ошибка API Hugging Face: {response.text}", flush=True)
+            return "Error", 0.0, 0
+            
+        results = response.json()
+        
+        # 3. Обработка ответов
         ai_scores =[]
-        for result in results:
-            lbl = str(result['label']).upper()
-            is_ai = lbl in['LABEL_1', 'AI', '1', 'FAKE']
-            score = result['score'] if is_ai else (1.0 - result['score'])
-            ai_scores.append(score)
+        for res_list in results:
+            # API возвращает список вероятностей для каждого куска
+            if isinstance(res_list, list) and len(res_list) > 0:
+                best_res = res_list[0]
+                lbl = str(best_res.get('label', '')).upper()
+                is_ai = lbl in ['LABEL_1', 'AI', '1', 'FAKE']
+                score = best_res.get('score', 0.0) if is_ai else (1.0 - best_res.get('score', 0.0))
+                ai_scores.append(score)
 
         if not ai_scores:
             return "Human", 0.0, 0
 
+        # 4. Финальная оценка (ваша фирменная логика)
         ai_chunks_count = sum(1 for s in ai_scores if s > 0.8)
         ai_ratio = ai_chunks_count / len(ai_scores)
         
@@ -395,17 +405,12 @@ def run_ai_logic(text: str):
         final_score = max(base_score, 0.75) if ai_ratio > 0.65 else base_score
         label = "AI" if final_score > 0.65 else "Human"
         
+        print("✅ Успешно проверено через API!", flush=True)
         return label, round(float(final_score), 2), len(chunks)
 
     except Exception as e:
-        print(f"Ошибка детектора ИИ: {e}", flush=True)
+        print(f"Критическая ошибка детектора ИИ: {e}", flush=True)
         return "Error", 0.0, 0
-        
-    finally:
-        if classifier is not None:
-            del classifier
-        gc.collect()
-        print("Детектор ИИ выгружен.", flush=True)
 
 # Функция для извлечения текста
 async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
