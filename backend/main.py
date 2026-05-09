@@ -889,7 +889,7 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
-    errors = []
+    errors =[]
     html_lines =[]
     
     current_block = "header" 
@@ -914,61 +914,46 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         alignment = "justify" 
         indent = "0.5cm"      
         
-        # УДК (Всегда слева)
         if lower_text.startswith("удк") or lower_text.startswith("udc"):
             current_block = "header"
             alignment = "left"
             indent = "0"
-
-        # Копирайт (Всегда справа)
         elif "©" in lower_text or "(c)" in lower_text:
             current_block = "copyright"
             alignment = "right"
             indent = "0"
-            # ИСПРАВЛЕНО: Требуем ровно 1 пустую строку (а не 2)
             if settings.check_apak and empty_lines != 1:
                 errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
-
-        # Блок Университета (11pt) - Расширенный поиск
         elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt", "e-mail", "mail.ru", "yandex.ru", "gmail.com"]):
             current_block = "university"
             alignment = "center"
             indent = "0"
-
-        # Аннотация и ключевые слова (По ширине, Курсив, 12pt)
         elif any(x in lower_text for x in["аннотация", "abstract", "ключевые слова", "keywords", "в работе", "в данной", "in the paper", "this paper", "this article"]):
             current_block = "abstract"
             alignment = "justify"
             indent = "0.5cm"
-
-        # Библиографический заголовок
         elif "библиографическ" in lower_text or "литература" in lower_text:
             current_block = "references"
             alignment = "center"
             indent = "0"
-
         else:
-            # ЕСЛИ ЯВНЫХ МАРКЕРОВ НЕТ - определяем по длине строки
             is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
-            
             if is_figure_caption or has_image:
                 current_block = "figure"
                 alignment = "center"
                 indent = "0"
             elif len(stripped_text) > 120:
-                # Длинные абзацы (>120 символов) - это всегда основной текст
                 current_block = "main"
                 alignment = "justify"
                 indent = "0.5cm"
             else:
-                # ИСПРАВЛЕНО: Короткие строки (<120) - это Английские заголовки, ФИО и т.д.
                 current_block = "header"
                 alignment = "center"
                 indent = "0"
 
         # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
-        # 11pt только для университета и email, остальное - 12pt
-        expected_size = 11 if current_block == "university" else 12
+        # ИСПРАВЛЕНО: Берем ожидаемый размер текста из настроек пользователя (settings.font_size)
+        expected_size = 11 if current_block == "university" else settings.font_size
         empty_lines = 0
 
         # --- 3. СТИЛЬ АБЗАЦА ---
@@ -984,31 +969,43 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
-            # Глубокий поиск размера шрифта (даже если он спрятан в стилях Word)
+            # --- ИСПРАВЛЕННЫЙ ПОИСК РАЗМЕРА ШРИФТА ---
             f_size = None
-            if run.font.size:
+            has_explicit_size = False # Флаг: задал ли пользователь размер руками
+            
+            if run.font and run.font.size:
                 f_size = run.font.size.pt
-            elif p.style.font.size:
+                has_explicit_size = True
+            elif p.style and hasattr(p.style, 'font') and p.style.font and p.style.font.size:
                 f_size = p.style.font.size.pt
-            elif p.style.base_style and p.style.base_style.font.size:
+                if p.style.name != 'Normal':
+                    has_explicit_size = True
+            elif p.style and hasattr(p.style, 'base_style') and p.style.base_style and hasattr(p.style.base_style, 'font') and p.style.base_style.font and p.style.base_style.font.size:
                 f_size = p.style.base_style.font.size.pt
+                if p.style.base_style.name != 'Normal':
+                    has_explicit_size = True
             else:
-                try: f_size = doc.styles['Normal'].font.size.pt
+                try: 
+                    if doc.styles['Normal'].font.size:
+                        f_size = doc.styles['Normal'].font.size.pt
                 except: pass
             
+            # ХАК: Обход системного поведения python-docx
+            # Если размер явно не задан руками (has_explicit_size=False), библиотека достает 11pt из 
+            # системного шаблона Normal, хотя в самом Word текст выглядит как 12/14pt. Мы это прощаем.
+            if f_size is not None and round(f_size) == 11 and not has_explicit_size:
+                f_size = expected_size
+
             # Проверка размера шрифта
             if current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
-                # ТЕПЕРЬ ОШИБКА ПОКАЖЕТ ТОЧНЫЙ РАЗМЕР ИЗ WORD
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                 t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
 
             if settings.check_apak:
-                # Двойные пробелы
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
                     t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
 
-                # Разрыв слов
                 def sub_standalone(m):
                     letter = m.group(2)
                     if letter.lower() not in valid_single_letters:
