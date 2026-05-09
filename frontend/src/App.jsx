@@ -39,6 +39,7 @@ function App() {
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showCookieWarning, setShowCookieWarning] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   
@@ -46,6 +47,9 @@ function App() {
   // 1. Проверка текущей сессии при загрузке
   useEffect(() => {
     const checkSession = async () => {
+      if (!navigator.cookieEnabled) {
+        setShowCookieWarning(true);
+      }
       try {
         const res = await axios.get(`${API_URL}/me`);
         if (res.data && res.data.email) {
@@ -128,6 +132,12 @@ function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     const url = authMode === 'login' ? 'login' : 'register';
+    const triggerCookieWarning = () => {
+      if (navigator.userAgent.includes("YaBrowser") || navigator.userAgent.includes("Safari")) {
+        setShowCookieWarning(true);
+      }
+    };
+    
     try {
       const res = await axios.post(`${API_URL}/${url}?email=${email}&password=${password}`);
       if (res.data.error) {
@@ -1208,6 +1218,43 @@ if (initializing) {
           )}
         </div>
       </main>
+      {showCookieWarning && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] w-[90%] max-w-2xl animate-in fade-in slide-in-from-bottom-8 duration-500">
+          <div className="bg-slate-900 border-2 border-blue-500/50 shadow-2xl rounded-[32px] p-8 text-white relative overflow-hidden">
+            {/* Декор */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 blur-3xl rounded-full"></div>
+            
+            <div className="flex items-start gap-6 relative z-10">
+              <div className="bg-blue-600 p-4 rounded-2xl shrink-0">
+                <ShieldCheck size={32} />
+              </div>
+              
+              <div>
+                <h4 className="text-xl font-black uppercase tracking-tight mb-2">Настройка доступа (Яндекс/Safari)</h4>
+                <p className="text-slate-300 text-sm leading-relaxed mb-6">
+                  Для корректной работы авторизации и анализа файлов необходимо разрешить сторонние куки. 
+                  Нажмите на <b>иконку замка или щита</b> в адресной строке и переключите <b>«Блокировка куки»</b> в положение <b>«Разрешено»</b>.
+                </p>
+                
+                <div className="flex gap-4">
+                  <button 
+                    onClick={() => setShowCookieWarning(false)}
+                    className="px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                  >
+                    Я всё настроил
+                  </button>
+                  <button 
+                    onClick={() => setShowCookieWarning(false)}
+                    className="px-8 py-3 bg-slate-800 text-slate-400 rounded-xl font-black text-[10px] uppercase tracking-widest"
+                  >
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

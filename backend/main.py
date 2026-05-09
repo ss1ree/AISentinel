@@ -532,7 +532,7 @@ def logout(response: Response):
     response.delete_cookie(
         "access_token",
         samesite="none" if IS_PRODUCTION else "lax",
-        secure=True if IS_PRODUCTION else False
+        secure=True if IS_PRODUCTION else False,
         domain=".railway.app"
     )
     return {"message": "Вышли"}
