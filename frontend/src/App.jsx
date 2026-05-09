@@ -87,7 +87,8 @@ function App() {
   const adminClearUserHistory = async (id) => {
     if (!window.confirm("Удалить ВСЮ историю сканов этого пользователя?")) return;
     try {
-      await axios.delete(`http://localhost:8000/admin/users/${id}/history`);
+      const BASE_URL = import.meta.env.VITE_API_URL || 'https://aisentinel-production-7cb5.up.railway.app';
+      await axios.delete(`${BASE_URL}/admin/users/${id}/history`);
       fetchAdminUsers(); // Обновляем цифры в таблице
     } catch (e) { alert("Ошибка очистки истории"); }
   };
