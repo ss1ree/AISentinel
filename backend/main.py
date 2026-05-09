@@ -917,8 +917,9 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         alignment = "justify" 
         indent = "1.25cm" # Стандартный абзацный отступ ГОСТ
         is_bold_override = False
-        is_spacing_error = False
+        is_spacing_error = False 
         is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
+        is_list_item = bool(p._element.xpath('.//w:numPr'))
         
         # 1. УДК (Слева)
         if lower_text.startswith("удк") or lower_text.startswith("udc"):
@@ -931,9 +932,9 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             current_block = "copyright"
             alignment = "right"
             indent = "0"
-            if settings.check_apak and empty_lines != 1:
+            if settings.norm_enabled and settings.check_apak and empty_lines != 1:
                 errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
-                is_spacing_error = True # <-- НОВОЕ: включаем подсветку
+                is_spacing_error = True
 
         # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
         elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
@@ -968,7 +969,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             indent = "0"
             
         # 8. ФИО, Руководитель, Название статьи, Заголовки (Всё короткое -> По центру)
-        elif len(stripped_text) < 100:
+        elif len(stripped_text) < 100 and not is_list_item and not stripped_text.endswith((";", ":", ",", "»", '"', "-")):
             current_block = "heading_or_title"
             alignment = "center"
             indent = "0"
@@ -992,13 +993,18 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
 
         if is_spacing_error:
             p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
-            
+
         p_html = f'<p style="{p_style}">'
         
         for run in p.runs:
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
+            if is_list_item and not marker_added and t.strip():
+                if not t.strip().startswith(("–", "-", "—", "•")):
+                    t = f"–    {t}"
+                marker_added = True
+
             f_size = None
             has_explicit_size = False
             
@@ -1022,11 +1028,13 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            if current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
+            # ДОБАВЛЕНО: settings.norm_enabled
+            if settings.norm_enabled and current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                 t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
 
-            if settings.check_apak:
+            # ДОБАВЛЕНО: settings.norm_enabled
+            if settings.norm_enabled and settings.check_apak:
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
                     t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
