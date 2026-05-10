@@ -1334,7 +1334,7 @@ if (initializing) {
           )}
         </div>
       </main>
-      {showCookieWarning && (
+      {/* {showCookieWarning && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] w-[90%] max-w-2xl animate-in fade-in slide-in-from-bottom-8 duration-500">
           <div className="bg-slate-900 border-2 border-blue-500/50 shadow-2xl rounded-[32px] p-8 text-white relative overflow-hidden">
             <div className="flex items-start gap-6 relative z-10">
@@ -1367,7 +1367,7 @@ if (initializing) {
             </div>
           </div>
         </div>
-      )}
+      )} */}
     </div>
   );
 }
