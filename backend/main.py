@@ -54,13 +54,12 @@ app = FastAPI()
 # )
 
 IS_PRODUCTION = os.getenv("IS_PRODUCTION", "false").lower() == "true"
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+frontend_url = os.getenv("FRONTEND_URL", "https://ai-sentinel-ppd9-chi.vercel.app")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         frontend_url,
-        r"https://ai-sentinel.*\.vercel\.app",
         "https://ai-sentinel-ppd9-chi.vercel.app",
         "http://localhost:5173"
     ], 
