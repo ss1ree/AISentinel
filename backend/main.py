@@ -1,6 +1,6 @@
 # import math
 import psutil
-from fastapi import FastAPI, Depends, HTTPException, Response, Request, File, UploadFile
+from fastapi import FastAPI, Header, Depends, HTTPException, Response, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from transformers import pipeline
@@ -119,10 +119,20 @@ def log_memory(step_name: str):
     print(f"📊 [ПАМЯТЬ | {step_name}] Занято: {used_mb:.0f} MB из {total_mb:.0f} MB ({percent}%)", flush=True)
 
 # Функция получения текущего пользователя из куки
-def get_current_user(request: Request, db: Session = Depends(get_db)):
-    token = request.cookies.get("access_token")
-    if not token:
+# def get_current_user(request: Request, db: Session = Depends(get_db)):
+#     token = request.cookies.get("access_token")
+#     if not token:
+#         return None
+#     try:
+#         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+#         email = payload.get("sub")
+#         return db.query(database.User).filter(database.User.email == email).first()
+#     except:
+#         return None
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
+    if not authorization or not authorization.startswith("Bearer "):
         return None
+    token = authorization.split(" ")[1] # Берем токен после "Bearer "
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email = payload.get("sub")
@@ -525,25 +535,35 @@ def register(email: str, password: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Успешно"}
 
+# @app.post("/login")
+# def login(email: str, password: str, response: Response, db: Session = Depends(get_db)):
+#     user = db.query(database.User).filter(database.User.email == email).first()
+#     if not user or not verify_password(password, user.hashed_password):
+#         return {"error": "Неверные данные"}
+    
+#     token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
+    
+#     # Устанавливаем куку
+#     response.set_cookie(
+#         key="access_token", 
+#         value=token, 
+#         httponly=True, 
+#         max_age=604800, # 7 дней
+#         samesite="none" if IS_PRODUCTION else "lax",
+#         secure=True if IS_PRODUCTION else False,
+#         domain=None
+#     )
+#     return {"email": user.email, "role": user.role }
 @app.post("/login")
-def login(email: str, password: str, response: Response, db: Session = Depends(get_db)):
+def login(email: str, password: str, db: Session = Depends(get_db)):
     user = db.query(database.User).filter(database.User.email == email).first()
     if not user or not verify_password(password, user.hashed_password):
         return {"error": "Неверные данные"}
     
     token = jwt.encode({"sub": user.email}, SECRET_KEY, algorithm=ALGORITHM)
     
-    # Устанавливаем куку
-    response.set_cookie(
-        key="access_token", 
-        value=token, 
-        httponly=True, 
-        max_age=604800, # 7 дней
-        samesite="none" if IS_PRODUCTION else "lax",
-        secure=True if IS_PRODUCTION else False,
-        domain=None
-    )
-    return {"email": user.email, "role": user.role }
+    # Больше не устанавливаем куку!
+    return {"email": user.email, "role": user.role, "access_token": token}
 
 @app.post("/logout")
 def logout(response: Response):

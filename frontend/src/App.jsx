@@ -9,7 +9,15 @@ import {
 } from 'lucide-react';
 
 // Настройка Axios для автоматической отправки куки
-axios.defaults.withCredentials = true;
+// axios.defaults.withCredentials = true;
+
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}, (error) => Promise.reject(error));
 
 function App() {
   const [settings, setSettings] = useState({
@@ -162,34 +170,43 @@ function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     const url = authMode === 'login' ? 'login' : 'register';
+    
     try {
       const res = await axios.post(`${API_URL}/${url}?email=${email}&password=${password}`);
       
       if (res.data.error) {
         alert(res.data.error);
-      } else {
-        if (authMode === 'login') {
-          // Сохраняем ВЕСЬ ответ сервера (там теперь есть и email, и role)
-          setUser(res.data); 
-          
-          // Загружаем настройки и историю
-          await fetchSettings();
-          await fetchHistory();
-          
-          // Опционально: если зашел админ, сразу подгружаем список юзеров
-          if (res.data.role === 'admin') {
-            fetchAdminUsers();
-          }
-        } else {
-          alert("Регистрация успешна! Теперь войдите.");
-          setAuthMode('login');
-        }
+        return;
       }
-    } catch (err) { alert("Ошибка авторизации"); }
+
+      if (authMode === 'login') {
+        // Сохраняем токен в localStorage
+        if (res.data.access_token) {
+          localStorage.setItem('token', res.data.access_token);
+        }
+        
+        // Устанавливаем пользователя
+        setUser(res.data);
+        
+        // Подгружаем данные
+        await fetchSettings();
+        await fetchHistory();
+        
+        if (res.data.role === 'admin') {
+          fetchAdminUsers();
+        }
+      } else {
+        alert("Регистрация успешна! Теперь войдите.");
+        setAuthMode('login');
+      }
+    } catch (err) { 
+      console.error(err);
+      alert("Ошибка авторизации или сервер недоступен"); 
+    }
   };
 
   const handleLogout = async () => {
-    await axios.post(`${API_URL}/logout`);
+    localStorage.removeItem('token');
     setUser(null);
     setHistory([]);
     setResult(null);
