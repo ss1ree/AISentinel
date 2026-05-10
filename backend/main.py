@@ -1025,7 +1025,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             # Восстанавливаем маркер списка (тире)
             if is_list_item and not marker_added and t.strip():
                 if not t.strip().startswith(("–", "-", "—", "•")):
-                    t = f"–    {t}"
+                    t = f"–&nbsp;&nbsp;&nbsp;{t}"
                 marker_added = True
                 
             f_size = None
