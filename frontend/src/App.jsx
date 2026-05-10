@@ -61,26 +61,27 @@ function App() {
   useEffect(() => {
     const checkSession = async () => {
       try {
-        // Проверка через запрос к бэкенду
-        await axios.get(`${API_URL}/me`);
-        // Если дошли сюда и всё ок — всё хорошо
-        setUser(res.data);
-        await fetchSettings();
-        await fetchHistory();
-      } catch (err) {
-        // ЕСЛИ ОШИБКА 401/403, значит мы не авторизованы или кука не записалась
-        setUser(null);
+        // Мы используем axios.interceptors, поэтому заголовок Authorization 
+        // подставится автоматически, если в localStorage есть токен
+        const res = await axios.get(`${API_URL}/me`);
         
-        // Добавляем проверку на "выкидывание": 
-        // Если мы точно знаем, что была попытка логина, но куки нет
-        // Или просто показываем предупреждение, если не удалось получить сессию
-        setShowCookieWarning(true); 
+        if (res.data && res.data.email) {
+          setUser(res.data);
+          await fetchSettings();
+          await fetchHistory();
+          if (res.data.role === 'admin') {
+            fetchAdminUsers();
+          }
+        }
+      } catch (err) {
+        console.log("Сессия не найдена или истекла");
+        setUser(null);
       } finally {
         setInitializing(false);
       }
     };
     checkSession();
-  }, []);
+  },[]);
 
   useEffect(() => {
     if (activeTab === 'admin' && user?.role === 'admin') {
@@ -210,6 +211,7 @@ function App() {
     setUser(null);
     setHistory([]);
     setResult(null);
+    setText('');
   };
 
   // 3. Логика анализа
