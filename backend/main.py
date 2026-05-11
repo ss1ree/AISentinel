@@ -374,14 +374,18 @@ def run_ai_logic(text: str):
         API_URL = "https://api-inference.huggingface.co/models/ss1ree/ai-sentinel-model"
         
         hf_token = os.getenv("HF_TOKEN", "")
-        headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+        # Если токена нет, Hugging Face часто отдает 403 или 404
+        headers = {"Authorization": f"Bearer {hf_token}"} 
         
-        # Отправляем весь массив кусков за 1 запрос
+        # Иногда нужно явно указать Content-Type
+        headers["Content-Type"] = "application/json"
+        
         payload = {
             "inputs": chunks,
-            "options": {"wait_for_model": True} # Ждем загрузки, если модель "спит"
+            "options": {"wait_for_model": True}
         }
 
+        # Используем POST, как и было, но добавим проверку токена
         response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
         
         if response.status_code != 200:
