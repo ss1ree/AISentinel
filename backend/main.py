@@ -331,21 +331,25 @@ def run_ai_logic(text: str):
     sample_text = " ".join(text.split())[:1500] 
 
     try:
-        # Получаем результат
+        # Получаем предсказание
         result = detector_pipeline(sample_text, truncation=True, max_length=512)[0]
         
-        # Приводим к общему формату
-        # Представим, что твоя модель выдает 'LABEL_1' (AI) или 'LABEL_0' (Human)
+        # Получаем метку и вероятность
         label_raw = result['label']
         score = float(result['score'])
         
-        # Логика: если LABEL_1 = AI, то вероятность AI = score. 
-        # Если LABEL_0 = AI, то AI = 1 - score.
-        # Подстрой под свою модель:
-        ai_prob = score if label_raw in ['LABEL_1', 'AI', 'FAKE'] else (1.0 - score)
+        # ЛОГИКА: 
+        # Если при обучении LABEL_1 был AI, а LABEL_0 был Human:
+        if label_raw == 'LABEL_1':
+            ai_prob = score
+        else:
+            ai_prob = 1.0 - score
+            
+        print(f"DEBUG: Label={label_raw}, RawScore={score}, FinalAIProb={ai_prob}", flush=True)
         
         label = "AI" if ai_prob > 0.65 else "Human"
-        
+        result = detector_pipeline("Пример текста", truncation=True, max_length=512)
+        print(f"DEBUG_TEST_MODEL: {result}", flush=True)
         return label, round(ai_prob, 2), 1
 
     except Exception as e:
