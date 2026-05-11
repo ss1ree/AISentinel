@@ -1070,37 +1070,35 @@ if (initializing) {
             <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
               
               {/* ВЕРХНЯЯ ПАНЕЛЬ: ПОИСК И ГЛОБАЛЬНАЯ ОЧИСТКА */}
-              <div className="flex flex-col gap-6">
-  
-                {/* Первая строка: Поиск и Скачивание */}
-                <div className="flex gap-4 items-center">
-                  <div className="flex-1 relative">
-                    <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400">
-                      <Search size={22} />
-                    </div>
-                    <input 
-                      type="text"
-                      placeholder="Поиск по email пользователя..."
-                      className="w-full pl-16 pr-8 py-6 bg-white border border-slate-200 rounded-[32px] outline-none focus:ring-4 focus:ring-blue-100/50 transition-all font-bold text-slate-700 shadow-sm"
-                      value={adminSearch}
-                      onChange={(e) => setAdminSearch(e.target.value)}
-                    />
+              <div className="flex gap-4 items-center">
+                {/* 1. Поиск (занимает всё свободное место) */}
+                <div className="flex-1 relative">
+                  <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Search size={22} />
                   </div>
-                  
-                  <button 
-                    onClick={() => window.open(`${API_URL}/admin/export-dataset`, '_blank')}
-                    className="flex items-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
-                  >
-                    <Database size={18} /> Скачать датасет (CSV)
-                  </button>
+                  <input 
+                    type="text"
+                    placeholder="Поиск по email..."
+                    className="w-full pl-16 pr-8 py-6 bg-white border border-slate-200 rounded-[32px] outline-none focus:ring-4 focus:ring-blue-100/50 transition-all font-bold text-slate-700 shadow-sm"
+                    value={adminSearch}
+                    onChange={(e) => setAdminSearch(e.target.value)}
+                  />
                 </div>
 
-                {/* Вторая строка: Глобальная очистка */}
+                {/* 2. Кнопка Скачать */}
+                <button 
+                  onClick={() => window.open(`${API_URL}/admin/export-dataset`, '_blank')}
+                  className="flex items-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                >
+                  <Database size={18} /> Скачать (CSV)
+                </button>
+
+                {/* 3. Кнопка Очистить */}
                 <button 
                   onClick={adminWipeAllHistory} 
-                  className="w-full flex items-center justify-center gap-3 px-8 py-6 bg-red-600 text-white hover:bg-red-700 rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95"
+                  className="flex items-center justify-center gap-3 px-8 py-6 bg-red-600 text-white hover:bg-red-700 rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
                 >
-                  <ServerCrash size={20} /> Очистить базу сканов
+                  <ServerCrash size={20} /> Очистить базу
                 </button>
               </div>
 
