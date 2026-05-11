@@ -353,6 +353,8 @@ def run_ai_logic(text: str):
         ai_prob = score if label_raw in['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
         
         label = "AI" if ai_prob > 0.65 else "Human"
+        result = detector_pipeline("Пример текста", truncation=True, max_length=512)
+        print(f"DEBUG_TEST_MODEL: {result}", flush=True)
         return label, round(ai_prob, 2), 1
     except Exception as e:
         print(f"Ошибка детектора ИИ: {e}", flush=True)
