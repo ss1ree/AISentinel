@@ -41,6 +41,7 @@ function App() {
   const [history, setHistory] = useState([]);
   const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
   const [feedbackSent, setFeedbackSent] = useState(false);
+  const[isFeedbackLoading, setIsFeedbackLoading] = useState(false);
   const [adminUsers, setAdminUsers] = useState([]);
   const [adminSearch, setAdminSearch] = useState('');
   const [adminSort, setAdminSort] = useState({ key: 'id', direction: 'asc' });
@@ -134,13 +135,15 @@ function App() {
   };
 
   const sendFeedback = async (resultId, isCorrect) => {
+    setIsFeedbackLoading(true); // <-- Включаем крутилку
     try {
-      // Используем axios, чтобы токен авторизации улетел автоматически
       await axios.post(`${API_URL}/feedback/${resultId}?correct=${isCorrect}`);
       setFeedbackSent(true); 
     } catch (error) {
       console.error("Ошибка при отправке фидбека:", error);
       alert("Не удалось отправить отзыв. Проверьте подключение.");
+    } finally {
+      setIsFeedbackLoading(false); // <-- Выключаем крутилку
     }
   };
 
@@ -828,20 +831,30 @@ if (initializing) {
                             {!feedbackSent ? (
                               <div className="feedback-section flex flex-col items-center">
                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Результат верный?</p>
-                                <div className="flex gap-4">
-                                  <button 
-                                    onClick={() => sendFeedback(result.id, true)}
-                                    className="px-6 py-2 bg-green-50 text-green-600 rounded-xl font-bold text-xs hover:bg-green-100 transition-all cursor-pointer"
-                                  >
-                                    ✅ Да
-                                  </button>
-                                  <button 
-                                    onClick={() => sendFeedback(result.id, false)}
-                                    className="px-6 py-2 bg-red-50 text-red-600 rounded-xl font-bold text-xs hover:bg-red-100 transition-all cursor-pointer"
-                                  >
-                                    ❌ Нет
-                                  </button>
-                                </div>
+                                <div className="feedback-section flex flex-col items-center">
+                                <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Результат верный?</p>
+                                
+                                {isFeedbackLoading ? (
+                                  <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest h-[32px]">
+                                    <div className="w-4 h-4 border-2 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+                                    Запись в датасет...
+                                  </div>
+                                ) : (
+                                  <div className="flex gap-4">
+                                    <button 
+                                      onClick={() => sendFeedback(result.id, true)}
+                                      className="px-6 py-2 bg-green-50 text-green-600 rounded-xl font-bold text-xs hover:bg-green-100 transition-all cursor-pointer"
+                                    >
+                                      ✅ Да
+                                    </button>
+                                    <button 
+                                      onClick={() => sendFeedback(result.id, false)}
+                                      className="px-6 py-2 bg-red-50 text-red-600 rounded-xl font-bold text-xs hover:bg-red-100 transition-all cursor-pointer"
+                                    >
+                                      ❌ Нет
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div className="feedback-thanks text-center animate-in fade-in zoom-in">
