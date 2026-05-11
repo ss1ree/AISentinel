@@ -328,36 +328,60 @@ def run_ai_logic(text: str):
     import gc
     from transformers import pipeline
 
-    # 1. Выгружаем семантику
+    # 1. Выгружаем семантику, если она загружена (освобождаем RAM)
     if model_registry["semantic"] is not None:
         model_registry["semantic"] = None
         gc.collect()
 
-    # 2. Инициализация (используем стандартный pipeline, он надежнее)
+    # 2. Инициализируем детектор (если еще не загружен)
     if model_registry["ai_detector"] is None:
-        print("🚀 Инициализация локального детектора ИИ (стандартный pipeline)...", flush=True)
+        print("🚀 Инициализация локального детектора ИИ...", flush=True)
         model_registry["ai_detector"] = pipeline(
             "text-classification", 
             model="ss1ree/ai-sentinel-model", 
             device=-1,
-            # low_cpu_mem_usage сильно экономит RAM при загрузке весов
-            model_kwargs={"low_cpu_mem_usage": True} 
+            model_kwargs={"low_cpu_mem_usage": True}
         )
 
+    # 3. Sliding Window: Разбивка текста на куски
+    # Убираем лишние пробелы и разбиваем по словам
+    words = text.split()
+    chunk_size = 250  # размер окна (в словах)
+    overlap = 50      # перекрытие (чтобы смысл не терялся на стыках)
+    
+    chunks =[]
+    for i in range(0, len(words), chunk_size - overlap):
+        chunk = " ".join(words[i : i + chunk_size])
+        if len(chunk) > 50: # игнорируем слишком короткие куски
+            chunks.append(chunk)
+
+    # Ограничиваем количество фрагментов, чтобы не перегрузить сервер
+    max_chunks = 10 
+    chunks = chunks[:max_chunks]
+
     try:
-        sample_text = " ".join(text.split())[:1500]
-        # Используем truncation=True и max_length=256 для экономии RAM при вычислениях
-        result = model_registry["ai_detector"](sample_text, truncation=True, max_length=512)
-        print(f"DEBUG_TEST_MODEL: {result}", flush=True)
-        res = result[0]
-        score = float(res['score'])
-        label_raw = res['label']
+        # Анализируем каждый фрагмент
+        ai_probs =[]
+        for chunk in chunks:
+            # truncation=True обязательно для длинных текстов
+            result = model_registry["ai_detector"](chunk, truncation=True, max_length=512)
+            res = result[0]
+            
+            score = float(res['score'])
+            label_raw = res['label']
+            
+            # Маппинг: LABEL_1 = AI, LABEL_0 = Human
+            prob = score if label_raw in['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
+            ai_probs.append(prob)
+
+        # 4. Усредняем результат
+        avg_ai_prob = sum(ai_probs) / len(ai_probs)
+        label = "AI" if avg_ai_prob > 0.65 else "Human"
         
-        # Маппинг (если твоя модель использует LABEL_1 как AI)
-        ai_prob = score if label_raw in['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
+        print(f"DEBUG: Analyzed {len(chunks)} chunks. Avg AI Prob: {avg_ai_prob:.2f}", flush=True)
         
-        label = "AI" if ai_prob > 0.65 else "Human"
-        return label, round(ai_prob, 2), 1
+        return label, round(avg_ai_prob, 2), len(chunks)
+
     except Exception as e:
         print(f"Ошибка детектора ИИ: {e}", flush=True)
         return "Error", 0.0, 0
