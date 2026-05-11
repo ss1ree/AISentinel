@@ -1188,18 +1188,28 @@ def get_admin_user(user: database.User = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Доступ запрещен. Вы не администратор.")
     return user
 
+import pandas as pd
+from fastapi.responses import StreamingResponse
+import io
+
 @app.get("/admin/export-dataset")
 def export_dataset(admin: database.User = Depends(get_admin_user), db: Session = Depends(get_db)):
-    # Выгружаем данные
+    # 1. Забираем все данные из таблицы training_data
     data = db.query(database.TrainingData).all()
     
-    # Конвертируем в pandas DataFrame
-    df = pd.DataFrame([{"text": d.text_content, "label": d.label} for d in data])
+    # 2. Превращаем в список словарей (текст и метка)
+    dataset =[{"text": d.text_content, "label": d.label} for d in data]
     
-    # Превращаем в CSV в памяти
+    # 3. Если данных нет, возвращаем ошибку
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Датасет пуст")
+        
+    # 4. Конвертируем в DataFrame и затем в CSV
+    df = pd.DataFrame(dataset)
     stream = io.StringIO()
-    df.to_csv(stream, index=False)
+    df.to_csv(stream, index=False, encoding='utf-8-sig') # utf-8-sig для корректного открытия в Excel
     
+    # 5. Возвращаем как файл
     response = Response(content=stream.getvalue(), media_type="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=training_dataset.csv"
     return response

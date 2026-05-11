@@ -856,6 +856,7 @@ if (initializing) {
                                   </div>
                                 )}
                               </div>
+                            </div>
                             ) : (
                               <div className="feedback-thanks text-center animate-in fade-in zoom-in">
                                 <p className="text-blue-600 font-black text-[10px] uppercase tracking-widest">
@@ -1083,6 +1084,12 @@ if (initializing) {
                     onChange={(e) => setAdminSearch(e.target.value)}
                   />
                 </div>
+                <button 
+                  onClick={() => window.open(`${API_URL}/admin/export-dataset`, '_blank')}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-700 transition-all cursor-pointer active:scale-95"
+                >
+                  <Database size={16} /> Скачать датасет (CSV)
+                </button>
                 <div className="lg:col-span-4">
                   <button 
                     onClick={adminWipeAllHistory} 
