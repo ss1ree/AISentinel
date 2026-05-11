@@ -913,6 +913,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     
     # Флаг: вошли ли мы в секцию библиографии
     in_references_section = False
+    prev_p_spacing_after = 0
 
     for p in doc.paragraphs:
         raw_text = p.text.replace('\t', '    ').replace('\x0c', '')
@@ -948,13 +949,12 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             alignment = "right"
             indent = "0"
             
-            spacing_before = p.paragraph_format.space_before.pt if p.paragraph_format.space_before else 0
-            
             if settings.norm_enabled and settings.check_apak:
-                if empty_lines < 1 and spacing_before < 10:
-                    errors.append(f"[АПАК] Перед копирайтом должен быть отступ или 1 пустая строка")
+                # Если пустых строк мало И отступ после списка не задан
+                if empty_lines < 1 and prev_p_spacing_after < 10: 
+                    errors.append(f"[АПАК] Перед копирайтом должен быть отступ")
                     is_spacing_error = True
-
+        
         # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
         elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
             current_block = "references_header"
@@ -998,6 +998,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             current_block = "main"
             alignment = "justify"
             indent = "1.25cm"
+
+        prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
 
         # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
         expected_size = 11 if current_block == "university" else settings.font_size
