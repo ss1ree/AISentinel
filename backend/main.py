@@ -949,10 +949,11 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             alignment = "right"
             indent = "0"
             
+            total_gap = (empty_lines * 14) + prev_p_spacing_after
+            
             if settings.norm_enabled and settings.check_apak:
-                # Если пустых строк мало И отступ после списка не задан
-                if empty_lines < 1 and prev_p_spacing_after < 10: 
-                    errors.append(f"[АПАК] Перед копирайтом должен быть отступ")
+                if total_gap < 10 or total_gap > 30:
+                    errors.append(f"[АПАК] Неверный интервал перед копирайтом")
                     is_spacing_error = True
         
         # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
