@@ -305,39 +305,52 @@ def split_into_chunks(text, chunk_size=4000):
 #         print(f"Ollama Error: {e}")
 #         return "Error", 0.0, 0, f"Ошибка локальной нейросети: {str(e)}"
 
-# def run_ai_logic(text: str):
-#     # Берем текст (не более 512 токенов, так как DistilBERT плохо работает с 15000)
-#     sample_text = " ".join(text.split())[:512]
+detector_pipeline = None
 
-#     # 1. Получаем предсказание от DistilBERT
-#     # Модель выдаст список: [{'label': 'LABEL_0', 'score': 0.95}]
-#     result = ai_classifier(sample_text)[0]
-    
-#     # Предположим: LABEL_1 - это AI, LABEL_0 - это Human
-#     # Если ваша модель выдала LABEL_1, значит это AI.
-#     # Если результат LABEL_0, score 0.9, значит вероятность AI = 0.1
-    
-#     # Приводим к единой шкале (вероятность того, что это ИИ)
-#     if result['label'] == 'LABEL_1':
-#         ai_prob = result['score']
-#     else:
-#         ai_prob = 1.0 - result['score']
+def run_ai_logic(text: str):
+    global detector_pipeline
+    import os
 
-#     # 2. Perplexity (оставляем как было)
-#     ppl = calculate_perplexity(sample_text)
-#     if ppl < 25:
-#         ppl_score = 0.8
-#     elif ppl < 40:
-#         ppl_score = 0.5
-#     else:
-#         ppl_score = 0.2
+    # 1. Ленивая загрузка (загружаем модель в память только при первом анализе)
+    if detector_pipeline is None:
+        print("🚀 Инициализация локального детектора ИИ...", flush=True)
+        log_memory("Перед загрузкой Детектора ИИ")
+        
+        # device=-1 означает использование CPU
+        # low_cpu_mem_usage=True критически важен для экономии RAM
+        detector_pipeline = pipeline(
+            "text-classification", 
+            model="ss1ree/ai-sentinel-model", 
+            device=-1,
+            model_kwargs={"low_cpu_mem_usage": True}
+        )
+        log_memory("После загрузки Детектора ИИ")
 
-#     # 3. Комбинирование (вес BERT теперь важнее — 0.7)
-#     final_score = (ai_prob * 0.7) + (ppl_score * 0.3)
+    # 2. Обработка текста
+    # Берем первые 512 токенов (стандарт для DistilBERT)
+    sample_text = " ".join(text.split())[:1500] 
 
-#     label = "AI" if final_score > 0.5 else "Human"
+    try:
+        # Получаем результат
+        result = detector_pipeline(sample_text, truncation=True, max_length=512)[0]
+        
+        # Приводим к общему формату
+        # Представим, что твоя модель выдает 'LABEL_1' (AI) или 'LABEL_0' (Human)
+        label_raw = result['label']
+        score = float(result['score'])
+        
+        # Логика: если LABEL_1 = AI, то вероятность AI = score. 
+        # Если LABEL_0 = AI, то AI = 1 - score.
+        # Подстрой под свою модель:
+        ai_prob = score if label_raw in ['LABEL_1', 'AI', 'FAKE'] else (1.0 - score)
+        
+        label = "AI" if ai_prob > 0.65 else "Human"
+        
+        return label, round(ai_prob, 2), 1
 
-#     return label, final_score, 1
+    except Exception as e:
+        print(f"Критическая ошибка детектора ИИ: {e}", flush=True)
+        return "Error", 0.0, 0
 
 def clean_text_thoroughly(text: str) -> str:
     # 1. Заменяем переносы строк на пробелы
@@ -346,88 +359,88 @@ def clean_text_thoroughly(text: str) -> str:
     # 3. join() собирает слова обратно через ОДИН пробел
     return " ".join(text.split())
 
-def run_ai_logic(text: str):
-    import os
-    import requests
-    import json
+# def run_ai_logic(text: str):
+#     import os
+#     import requests
+#     import json
     
-    print("🚀 Запуск детектора ИИ через Облачный API (0 MB RAM)...", flush=True)
+#     print("🚀 Запуск детектора ИИ через Облачный API (0 MB RAM)...", flush=True)
     
-    try:
-        # 1. Очистка и разбивка текста
-        clean_text = clean_text_thoroughly(text)
-        words = clean_text.split()
+#     try:
+#         # 1. Очистка и разбивка текста
+#         clean_text = clean_text_thoroughly(text)
+#         words = clean_text.split()
         
-        if not words:
-            return "Human", 0.0, 0
+#         if not words:
+#             return "Human", 0.0, 0
             
-        chunk_size = 300
-        overlap = 50
-        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
+#         chunk_size = 300
+#         overlap = 50
+#         chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size - overlap)]
         
-        # Для API берем максимум 10 равномерных чанков, чтобы не спамить сервер
-        if len(chunks) > 10:
-            step = len(chunks) / 10
-            chunks = [chunks[int(i * step)] for i in range(10)]
+#         # Для API берем максимум 10 равномерных чанков, чтобы не спамить сервер
+#         if len(chunks) > 10:
+#             step = len(chunks) / 10
+#             chunks = [chunks[int(i * step)] for i in range(10)]
 
-        # 2. Обращение к API Hugging Face
-        API_URL = "https://huggingface.co/ss1ree/ai-sentinel-model"
+#         # 2. Обращение к API Hugging Face
+#         API_URL = "https://api-inference.huggingface.co/models/ss1ree/ai-sentinel-model"
         
-        hf_token = os.getenv("HF_TOKEN", "")
-        # Если токена нет, Hugging Face часто отдает 403 или 404
-        headers = {"Authorization": f"Bearer {hf_token}"} 
+#         hf_token = os.getenv("HF_TOKEN", "")
+#         # Если токена нет, Hugging Face часто отдает 403 или 404
+#         headers = {"Authorization": f"Bearer {hf_token}"} 
         
-        # Иногда нужно явно указать Content-Type
-        headers["Content-Type"] = "application/json"
+#         # Иногда нужно явно указать Content-Type
+#         headers["Content-Type"] = "application/json"
         
-        payload = {
-            "inputs": chunks,
-            "options": {"wait_for_model": True}
-        }
+#         payload = {
+#             "inputs": chunks,
+#             "options": {"wait_for_model": True}
+#         }
         
-        # Используем POST, как и было, но добавим проверку токена
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-        if response.status_code != 200:
-            print(f"DEBUG: Status {response.status_code}, Response: {response.text}", flush=True)
-            return "Error", 0.0, 0
+#         # Используем POST, как и было, но добавим проверку токена
+#         response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+#         if response.status_code != 200:
+#             print(f"DEBUG: Status {response.status_code}, Response: {response.text}", flush=True)
+#             return "Error", 0.0, 0
         
-        if response.status_code != 200:
-            print(f"Ошибка API Hugging Face: {response.text}", flush=True)
-            return "Error", 0.0, 0
+#         if response.status_code != 200:
+#             print(f"Ошибка API Hugging Face: {response.text}", flush=True)
+#             return "Error", 0.0, 0
             
-        results = response.json()
+#         results = response.json()
         
-        # 3. Обработка ответов
-        ai_scores =[]
-        for res_list in results:
-            # API возвращает список вероятностей для каждого куска
-            if isinstance(res_list, list) and len(res_list) > 0:
-                best_res = res_list[0]
-                lbl = str(best_res.get('label', '')).upper()
-                is_ai = lbl in ['LABEL_1', 'AI', '1', 'FAKE']
-                score = best_res.get('score', 0.0) if is_ai else (1.0 - best_res.get('score', 0.0))
-                ai_scores.append(score)
+#         # 3. Обработка ответов
+#         ai_scores =[]
+#         for res_list in results:
+#             # API возвращает список вероятностей для каждого куска
+#             if isinstance(res_list, list) and len(res_list) > 0:
+#                 best_res = res_list[0]
+#                 lbl = str(best_res.get('label', '')).upper()
+#                 is_ai = lbl in ['LABEL_1', 'AI', '1', 'FAKE']
+#                 score = best_res.get('score', 0.0) if is_ai else (1.0 - best_res.get('score', 0.0))
+#                 ai_scores.append(score)
 
-        if not ai_scores:
-            return "Human", 0.0, 0
+#         if not ai_scores:
+#             return "Human", 0.0, 0
 
-        # 4. Финальная оценка (ваша фирменная логика)
-        ai_chunks_count = sum(1 for s in ai_scores if s > 0.8)
-        ai_ratio = ai_chunks_count / len(ai_scores)
+#         # 4. Финальная оценка (ваша фирменная логика)
+#         ai_chunks_count = sum(1 for s in ai_scores if s > 0.8)
+#         ai_ratio = ai_chunks_count / len(ai_scores)
         
-        k = max(1, int(len(ai_scores) * 0.3))
-        top_scores = sorted(ai_scores, reverse=True)[:k]
-        base_score = sum(top_scores) / len(top_scores)
+#         k = max(1, int(len(ai_scores) * 0.3))
+#         top_scores = sorted(ai_scores, reverse=True)[:k]
+#         base_score = sum(top_scores) / len(top_scores)
         
-        final_score = max(base_score, 0.75) if ai_ratio > 0.65 else base_score
-        label = "AI" if final_score > 0.65 else "Human"
+#         final_score = max(base_score, 0.75) if ai_ratio > 0.65 else base_score
+#         label = "AI" if final_score > 0.65 else "Human"
         
-        print("✅ Успешно проверено через API!", flush=True)
-        return label, round(float(final_score), 2), len(chunks)
+#         print("✅ Успешно проверено через API!", flush=True)
+#         return label, round(float(final_score), 2), len(chunks)
 
-    except Exception as e:
-        print(f"Критическая ошибка детектора ИИ: {e}", flush=True)
-        return "Error", 0.0, 0
+#     except Exception as e:
+#         print(f"Критическая ошибка детектора ИИ: {e}", flush=True)
+#         return "Error", 0.0, 0
 
 # Функция для извлечения текста
 async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
