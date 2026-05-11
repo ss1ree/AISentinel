@@ -947,9 +947,13 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             current_block = "copyright"
             alignment = "right"
             indent = "0"
-            if settings.norm_enabled and settings.check_apak and empty_lines != 1:
-                errors.append(f"[АПАК] Перед копирайтом нужна 1 пустая строка (найдено: {empty_lines})")
-                is_spacing_error = True
+            
+            spacing_before = p.paragraph_format.space_before.pt if p.paragraph_format.space_before else 0
+            
+            if settings.norm_enabled and settings.check_apak:
+                if empty_lines < 1 and spacing_before < 10:
+                    errors.append(f"[АПАК] Перед копирайтом должен быть отступ или 1 пустая строка")
+                    is_spacing_error = True
 
         # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
         elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
