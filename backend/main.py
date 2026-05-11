@@ -130,6 +130,22 @@ def log_memory(step_name: str):
 #         return db.query(database.User).filter(database.User.email == email).first()
 #     except:
 #         return None
+
+# Глобальный менеджер памяти
+model_registry = {
+    "semantic": None,
+    "ai_detector": None
+}
+
+def unload_model(model_key):
+    global model_registry
+    if model_registry[model_key] is not None:
+        print(f"🧹 Выгружаю {model_key} из памяти...", flush=True)
+        model_registry[model_key] = None
+        torch.cuda.empty_cache() # Если есть GPU
+        import gc
+        gc.collect()
+
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
         return None
@@ -308,52 +324,38 @@ def split_into_chunks(text, chunk_size=4000):
 detector_pipeline = None
 
 def run_ai_logic(text: str):
-    global detector_pipeline
-    import os
+    global model_registry
+    import gc
+    from transformers import pipeline
 
-    # 1. Ленивая загрузка (загружаем модель в память только при первом анализе)
-    if detector_pipeline is None:
+    # Выгружаем семантическую модель, чтобы освободить место для Детектора
+    if model_registry["semantic"] is not None:
+        print("🧹 Выгружаю семантическую модель для загрузки ИИ-детектора...", flush=True)
+        model_registry["semantic"] = None
+        gc.collect()
+
+    if model_registry["ai_detector"] is None:
         print("🚀 Инициализация локального детектора ИИ...", flush=True)
-        log_memory("Перед загрузкой Детектора ИИ")
-        
-        # device=-1 означает использование CPU
-        # low_cpu_mem_usage=True критически важен для экономии RAM
-        detector_pipeline = pipeline(
+        model_registry["ai_detector"] = pipeline(
             "text-classification", 
             model="ss1ree/ai-sentinel-model", 
             device=-1,
             model_kwargs={"low_cpu_mem_usage": True}
         )
-        log_memory("После загрузки Детектора ИИ")
-
-    # 2. Обработка текста
-    # Берем первые 512 токенов (стандарт для DistilBERT)
-    sample_text = " ".join(text.split())[:1500] 
 
     try:
-        # Получаем предсказание
-        result = detector_pipeline(sample_text, truncation=True, max_length=512)[0]
+        sample_text = " ".join(text.split())[:1500]
+        result = model_registry["ai_detector"](sample_text, truncation=True, max_length=512)[0]
         
-        # Получаем метку и вероятность
+        # Исправляем маппинг меток (LABEL_1 - AI, LABEL_0 - Human)
         label_raw = result['label']
         score = float(result['score'])
-        
-        # ЛОГИКА: 
-        # Если при обучении LABEL_1 был AI, а LABEL_0 был Human:
-        if label_raw == 'LABEL_1':
-            ai_prob = score
-        else:
-            ai_prob = 1.0 - score
-            
-        print(f"DEBUG: Label={label_raw}, RawScore={score}, FinalAIProb={ai_prob}", flush=True)
+        ai_prob = score if label_raw in['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
         
         label = "AI" if ai_prob > 0.65 else "Human"
-        result = detector_pipeline("Пример текста", truncation=True, max_length=512)
-        print(f"DEBUG_TEST_MODEL: {result}", flush=True)
         return label, round(ai_prob, 2), 1
-
     except Exception as e:
-        print(f"Критическая ошибка детектора ИИ: {e}", flush=True)
+        print(f"Ошибка детектора ИИ: {e}", flush=True)
         return "Error", 0.0, 0
 
 def clean_text_thoroughly(text: str) -> str:
@@ -477,15 +479,22 @@ async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
     return content
 
 def check_semantic_rules(doc, settings: database.CheckSettings):
-    import gc
+    global model_registry
     from sentence_transformers import SentenceTransformer, util
-    import re
+    import gc
     
-    errors = []
-    paragraphs =[p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    # Выгружаем ИИ-детектор, чтобы освободить место для rubert-tiny2
+    if model_registry["ai_detector"] is not None:
+        print("🧹 Выгружаю ИИ-детектор для загрузки семантики...", flush=True)
+        model_registry["ai_detector"] = None
+        gc.collect()
+
+    errors =[]
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     full_text_lower = "\n".join(paragraphs).lower()
     org_ru, org_en, abstract_text, main_body = "", "", "", ""
     
+    # ... (логика извлечения org_ru, org_en, abstract_text, main_body остается прежней) ...
     for i, p in enumerate(paragraphs):
         p_low = p.lower()
         if i < 15:
@@ -498,22 +507,18 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if len(p) > 400 and not main_body:
             main_body = p
 
-    sem_model = None
     try:
         if settings.check_translation or settings.check_abstract:
-            print("Загрузка семантической модели (rubert-tiny2)...", flush=True)
-            log_memory("Перед загрузкой rubert-tiny2")
+            if model_registry["semantic"] is None:
+                print("Загрузка семантической модели (rubert-tiny2)...", flush=True)
+                model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
             
-            # ВАЖНО: Используем ультра-легкую модель!
-            sem_model = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
-            
-            log_memory("После загрузки rubert-tiny2")
+            sem_model = model_registry["semantic"]
 
             if settings.check_translation and org_ru and org_en:
                 emb1 = sem_model.encode(org_ru, convert_to_tensor=True)
                 emb2 = sem_model.encode(org_en, convert_to_tensor=True)
                 sim = util.pytorch_cos_sim(emb1, emb2).item()
-                # Порог снижен до 0.6, так как у tiny модели другое распределение векторов
                 if sim < 0.60:
                     errors.append(f"[NLP] Перевод организации: сходство {int(sim*100)}%")
             
@@ -526,14 +531,9 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
                 
     except Exception as e:
         print(f"Ошибка в блоке семантики: {e}", flush=True)
-        errors.append(f"[Система] Ошибка NLP модуля")
-    finally:
-        if sem_model is not None:
-            del sem_model
-        gc.collect()
-        print("Семантическая модель выгружена.", flush=True)
+        errors.append("[Система] Ошибка NLP модуля")
 
-    if settings.check_expert and not any(word in full_text_lower for word in["экспертное заключение", "экспортный контроль"]):
+    if settings.check_expert and not any(word in full_text_lower for word in ["экспертное заключение", "экспортный контроль"]):
         errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
 
     return errors
