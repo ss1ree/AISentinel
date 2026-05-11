@@ -1191,7 +1191,9 @@ def delete_history_item(result_id: int, db: Session = Depends(get_db), user: dat
 
 # --- ЗАЩИТА АДМИНКИ ---
 def get_admin_user(user: database.User = Depends(get_current_user)):
-    if not user or user.role != "admin":
+    if not user:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    if user.role != "admin":
         raise HTTPException(status_code=403, detail="Доступ запрещен. Вы не администратор.")
     return user
 

@@ -352,6 +352,22 @@ function App() {
     }
   };
 
+  const downloadDataset = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/admin/export-dataset`, {
+        responseType: 'blob', // Важно для файлов
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'training_dataset.csv');
+      document.body.appendChild(link);
+      link.click();
+    } catch (e) {
+      alert("Ошибка: У вас нет прав администратора или сервер недоступен");
+    }
+  };
+
   const deleteHistoryItem = async (id) => {
     try {
       // Используйте ваш API_URL, если он у вас настроен через переменные
@@ -1087,7 +1103,7 @@ if (initializing) {
 
                 {/* 2. Кнопка Скачать */}
                 <button 
-                  onClick={() => window.open(`${API_URL}/admin/export-dataset`, '_blank')}
+                  onClick={downloadDataset}
                   className="flex items-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
                 >
                   <Database size={18} /> Скачать (CSV)
