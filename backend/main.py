@@ -18,7 +18,7 @@ import tempfile
 import os
 # import json
 # from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
-# import csv
+import csv
 # import ollama
 import torch
 from striprtf.striprtf import rtf_to_text
@@ -612,7 +612,7 @@ def save_feedback(result_id: int, correct: bool, db: Session = Depends(get_db), 
 
     # Запись в новую таблицу
     new_train_data = database.TrainingData(
-        text_content=" ".join(db_result.text_content.split()[:500]),
+        text_content=db_result.text_content, 
         label=final_label
     )
     db.add(new_train_data)
@@ -1205,20 +1205,19 @@ import io
 def export_dataset(admin: database.User = Depends(get_admin_user), db: Session = Depends(get_db)):
     # 1. Забираем все данные из таблицы training_data
     data = db.query(database.TrainingData).all()
-    
-    # 2. Превращаем в список словарей (текст и метка)
-    dataset =[{"text": d.text_content, "label": d.label} for d in data]
-    
-    # 3. Если данных нет, возвращаем ошибку
-    if not dataset:
+    if not data:
         raise HTTPException(status_code=404, detail="Датасет пуст")
         
-    # 4. Конвертируем в DataFrame и затем в CSV
-    df = pd.DataFrame(dataset)
+    # 2. Формируем файл
+    df = pd.DataFrame([{"text": d.text_content, "label": d.label} for d in data])
     stream = io.StringIO()
-    df.to_csv(stream, index=False, encoding='utf-8-sig') # utf-8-sig для корректного открытия в Excel
+    # Используем quotechar, чтобы переносы строк внутри текста не ломали структуру CSV
+    df.to_csv(stream, index=False, encoding='utf-8-sig', quoting=csv.QUOTE_ALL)
     
-    # 5. Возвращаем как файл
+    # 3. ОЧИСТКА БАЗЫ (выполняем после успешного формирования)
+    db.query(database.TrainingData).delete()
+    db.commit()
+    
     response = Response(content=stream.getvalue(), media_type="text/csv")
     response.headers["Content-Disposition"] = "attachment; filename=training_dataset.csv"
     return response
