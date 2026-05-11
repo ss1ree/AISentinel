@@ -39,6 +39,13 @@ class DetectionResult(Base):
     owner = relationship("User", back_populates="results")
     user_feedback = Column(Boolean, nullable=True)
 
+class TrainingData(Base):
+    __tablename__ = "training_data"
+    id = Column(Integer, primary_key=True, index=True)
+    text_content = Column(Text)
+    label = Column(Integer) # 1 - AI, 0 - Human
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class CheckSettings(Base):
     __tablename__ = "check_settings"
     id = Column(Integer, primary_key=True, index=True)

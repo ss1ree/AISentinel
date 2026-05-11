@@ -18,13 +18,14 @@ import tempfile
 import os
 # import json
 # from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
-import csv
+# import csv
 # import ollama
 import torch
 from striprtf.striprtf import rtf_to_text
 import re
 import subprocess
 import platform
+import pandas as pd
 
 IS_WINDOWS = platform.system() == "Windows"
 if IS_WINDOWS:
@@ -588,47 +589,32 @@ def home():
 def save_feedback(result_id: int, correct: bool, db: Session = Depends(get_db), user: database.User = Depends(get_current_user)):
     if not user: raise HTTPException(status_code=401)
     
-    # 1. Ищем запись в базе
     db_result = db.query(database.DetectionResult).filter(
         database.DetectionResult.id == result_id,
         database.DetectionResult.owner_id == user.id
     ).first()
     
-    if not db_result:
-        raise HTTPException(status_code=404, detail="Результат не найден")
+    if not db_result or db_result.user_feedback is not None:
+        raise HTTPException(status_code=404, detail="Результат не найден или фидбек уже учтен")
 
-    # Предотвращаем повторную запись, если фидбек уже был
-    if db_result.user_feedback is not None:
-        return {"status": "already_done", "message": "Фидбек уже учтен"}
-
-    # 2. Определяем ПРАВИЛЬНУЮ метку для обучения
-    # Если модель сказала AI и пользователь нажал "Да" (correct=True) -> это 1 (AI)
-    # Если модель сказала AI и пользователь нажал "Нет" (correct=False) -> это 0 (Human)
+    # Определяем метку (1 - AI, 0 - Human)
     if correct:
         final_label = 1 if db_result.label == "AI" else 0
     else:
         final_label = 0 if db_result.label == "AI" else 1
 
-    # 3. Дописываем данные в balanced_dataset.csv
-    file_path = "studying/balanced_dataset.csv"
-    try:
-        # Создаем папку studying, если её вдруг нет (exist_ok=True игнорирует ошибку, если она уже есть)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
-        # 'a' означает append (дозапись в конец файла, если файла нет - он создастся сам)
-        with open(file_path, mode='a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            # Очищаем текст от лишних переносов строк, чтобы не сломать CSV структуру
-            clean_text = " ".join(db_result.text_content.split())
-            writer.writerow([clean_text, final_label])
-    except Exception as e:
-        print(f"Ошибка записи в CSV: {e}")
-
-    # 4. Сохраняем статус в базу данных
+    # Запись в новую таблицу
+    new_train_data = database.TrainingData(
+        text_content=" ".join(db_result.text_content.split()[:500]),
+        label=final_label
+    )
+    db.add(new_train_data)
+    
+    # Сохраняем статус в базу данных
     db_result.user_feedback = correct
     db.commit()
     
-    return {"status": "success", "message": "Данные сохранены и добавлены в датасет"}
+    return {"status": "success"}
 
 @app.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
@@ -1201,6 +1187,22 @@ def get_admin_user(user: database.User = Depends(get_current_user)):
     if not user or user.role != "admin":
         raise HTTPException(status_code=403, detail="Доступ запрещен. Вы не администратор.")
     return user
+
+@app.get("/admin/export-dataset")
+def export_dataset(admin: database.User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    # Выгружаем данные
+    data = db.query(database.TrainingData).all()
+    
+    # Конвертируем в pandas DataFrame
+    df = pd.DataFrame([{"text": d.text_content, "label": d.label} for d in data])
+    
+    # Превращаем в CSV в памяти
+    stream = io.StringIO()
+    df.to_csv(stream, index=False)
+    
+    response = Response(content=stream.getvalue(), media_type="text/csv")
+    response.headers["Content-Disposition"] = "attachment; filename=training_dataset.csv"
+    return response
 
 # Получить всех пользователей (для админки)
 @app.get("/admin/users")
