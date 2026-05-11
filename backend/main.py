@@ -974,86 +974,164 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             
         lower_text = stripped_text.lower()
         
-        # --- 1. УМНОЕ ОПРЕДЕЛЕНИЕ БЛОКА ---
-        alignment = "justify"; indent = "1.25cm"
+        # --- 1. УМНОЕ ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
+        alignment = "justify" 
+        indent = "1.25cm" # Стандартный абзацный отступ ГОСТ
         is_bold_override = False
-        is_italic_override = False # Добавили флаг
+        is_italic_override = False
         is_spacing_error = False 
         is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
         is_list_item = bool(p._element.xpath('.//w:numPr'))
         
-        # Логика блоков
+        # 1. УДК (Слева)
         if lower_text.startswith("удк") or lower_text.startswith("udc"):
-            current_block = "udk"; alignment = "left"; indent = "0"
+            current_block = "udk"
+            alignment = "left"
+            indent = "0"
+        
         elif lower_text.startswith("таблица"):
             current_block = "table_header_index"; alignment = "right"; indent = "0"; is_italic_override = True
-        elif current_block == "table_header_index":
+        elif current_block == "table_header_index" and len(stripped_text) < 100:
             current_block = "table_header_title"; alignment = "center"; indent = "0"; is_bold_override = True
-        elif "©" in lower_text or "(c)" in lower_text:
-            current_block = "copyright"; alignment = "right"; indent = "0"
-            total_gap = (empty_lines * 14) + prev_p_spacing_after
-            if settings.norm_enabled and settings.check_apak and (total_gap < 10 or total_gap > 30):
-                errors.append(f"[АПАК] Неверный интервал перед копирайтом"); is_spacing_error = True
-        elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
-            current_block = "references_header"; alignment = "center"; indent = "0"; in_references_section = True; is_bold_override = True
-        elif in_references_section:
-            current_block = "reference_item"; alignment = "justify"; indent = "0" 
-        elif lower_text.startswith(("аннотация", "abstract", "ключевые слова", "keywords")):
-            current_block = "abstract"; alignment = "center"; indent = "0"
-        elif is_figure_caption or has_image:
-            current_block = "figure"; alignment = "center"; indent = "0"
-        elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt", "e-mail", "mail.ru", "yandex.ru", "gmail.com"]):
-            current_block = "university"; alignment = "center"; indent = "0"
-        elif len(stripped_text) < 100 and not is_list_item and not stripped_text.endswith((";", ":", ",", "»", '"', "-")):
-            current_block = "heading_or_title"; alignment = "center"; indent = "0"
-        else:
-            current_block = "main"; alignment = "justify"; indent = "1.25cm"
 
-        # Установка размера
+        # 2. Копирайт (Справа)
+        elif "©" in lower_text or "(c)" in lower_text:
+            current_block = "copyright"
+            alignment = "right"
+            indent = "0"
+            
+            total_gap = (empty_lines * 14) + prev_p_spacing_after
+            
+            if settings.norm_enabled and settings.check_apak:
+                if total_gap < 10 or total_gap > 30:
+                    errors.append(f"[АПАК] Неверный интервал перед копирайтом")
+                    is_spacing_error = True
+        
+        # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
+        elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
+            current_block = "references_header"
+            alignment = "center"
+            indent = "0"
+            in_references_section = True
+            is_bold_override = True # Принудительно делаем жирным
+            
+        # 4. Если мы вошли в секцию ссылок, то сами ссылки по ширине без отступа
+        elif in_references_section:
+            current_block = "reference_item"
+            alignment = "justify"
+            indent = "0" 
+            
+        # 5. Аннотация и ключевые слова (По центру)
+        elif lower_text.startswith("аннотация") or lower_text.startswith("abstract") or lower_text.startswith("ключевые слова") or lower_text.startswith("keywords"):
+            current_block = "abstract"
+            alignment = "center"
+            indent = "0"
+            
+        # 6. Картинки и подписи (По центру)
+        elif is_figure_caption or has_image:
+            current_block = "figure"
+            alignment = "center"
+            indent = "0"
+            
+        # 7. Университет / Email (По центру)
+        elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt", "e-mail", "mail.ru", "yandex.ru", "gmail.com"]):
+            current_block = "university"
+            alignment = "center"
+            indent = "0"
+            
+        # 8. ФИО, Руководитель, Название статьи, Заголовки (Всё короткое -> По центру)
+        elif len(stripped_text) < 100 and not is_list_item and not stripped_text.endswith((";", ":", ",", "»", '"', "-")):
+            current_block = "heading_or_title"
+            alignment = "center"
+            indent = "0"
+            
+        # 9. Основной длинный текст (По ширине - Justify)
+        else:
+            current_block = "main"
+            alignment = "justify"
+            indent = "1.25cm"
+
+        prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
+
+        # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
         expected_size = 11 if (current_block == "university" or current_block.startswith("table_header")) else settings.font_size
         empty_lines = 0
 
-        # --- 3. СТИЛЬ АБЗАЦА ---
+        # СТИЛЬ
         p_style = f"margin: 0; line-height: 1.5; white-space: pre-wrap; vertical-align: baseline; font-family: 'Times New Roman', serif; text-align: {alignment}; text-indent: {indent}; "
+        
         if is_bold_override: p_style += "font-weight: bold; "
         if is_italic_override: p_style += "font-style: italic; "
         if is_spacing_error: p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
 
         p_html = f'<p style="{p_style}">'
+        
+        # ВАЖНО: Эта переменная должна быть ровно здесь, ПЕРЕД циклом runs!
         marker_added = False 
         
         for run in p.runs:
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
-            if is_list_item and not marker_added and t.strip():
-                if not t.strip().startswith(("–", "-", "—", "•")): t = f"–&nbsp;&nbsp;&nbsp;{t}"
-                marker_added = True
             
+            # Восстанавливаем маркер списка (тире)
+            if is_list_item and not marker_added and t.strip():
+                if not t.strip().startswith(("–", "-", "—", "•")):
+                    t = f"–&nbsp;&nbsp;&nbsp;{t}"
+                marker_added = True
+                
             f_size = None
             has_explicit_size = False
-            if run.font and run.font.size: f_size = run.font.size.pt; has_explicit_size = True
+            
+            if run.font and run.font.size:
+                f_size = run.font.size.pt
+                has_explicit_size = True
             elif p.style and hasattr(p.style, 'font') and p.style.font and p.style.font.size:
                 f_size = p.style.font.size.pt
-                if p.style.name != 'Normal': has_explicit_size = True
+                if p.style.name != 'Normal':
+                    has_explicit_size = True
+            elif p.style and hasattr(p.style, 'base_style') and p.style.base_style and hasattr(p.style.base_style, 'font') and p.style.base_style.font and p.style.base_style.font.size:
+                f_size = p.style.base_style.font.size.pt
+                if p.style.base_style.name != 'Normal':
+                    has_explicit_size = True
+            else:
+                try: 
+                    if doc.styles['Normal'].font.size:
+                        f_size = doc.styles['Normal'].font.size.pt
+                except: pass
             
-            if f_size is not None and round(f_size) == 11 and not has_explicit_size: f_size = expected_size
+            if f_size is not None and round(f_size) == 11 and not has_explicit_size:
+                f_size = expected_size
+
+            # Проверка шрифта (только если нормоконтроль Включен)
             if settings.norm_enabled and current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
                 errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                 t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
 
+            # Проверка пробелов (только если нормоконтроль Включен)
             if settings.norm_enabled and settings.check_apak:
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
                     t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
-                # (Тут твои регулярочки sub_standalone и sub_illegal_start...)
-                # ... (код регулярок оставь как был) ...
+
+                def sub_standalone(m):
+                    letter = m.group(2)
+                    if letter.lower() not in valid_single_letters:
+                        errors.append(f"[Типографика] Разрыв слова '{letter}'")
+                        return f"{m.group(1)}<mark style='background-color: #ffedd5; outline: 1px solid #ea580c; outline-offset: -1px;'>{letter}</mark> "
+                    return m.group(0)
+                t = re.sub(r'(^|\s)([а-яА-ЯёЁ])\s', sub_standalone, t)
+
+                def sub_illegal_start(m):
+                    errors.append(f"[Типографика] Разрыв слова")
+                    return f"{m.group(1)}<mark style='background-color: #ffedd5; outline: 1px solid #ea580c;'>{m.group(2)}</mark>{m.group(3)}"
+                t = re.sub(r'(^|\s)([ьыъЬЫЪ])([а-яА-ЯёЁ]+)', sub_illegal_start, t)
 
             if run.bold: t = f"<b>{t}</b>"
             if run.italic: t = f"<i>{t}</i>"
             p_html += t
+            
         p_html += "</p>"
         html_lines.append(p_html)
-        prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
 
     return "".join(html_lines), list(dict.fromkeys(errors))
 
