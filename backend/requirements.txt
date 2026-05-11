@@ -15,3 +15,4 @@ safetensors
 psutil
 requests
 pandas
+optimum

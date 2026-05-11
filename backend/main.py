@@ -326,44 +326,44 @@ detector_pipeline = None
 def run_ai_logic(text: str):
     global model_registry
     import gc
-    from transformers import pipeline
+    from optimum.pipelines import pipeline # Импортируем из optimum
 
     # 1. Выгружаем семантику
     if model_registry["semantic"] is not None:
-        print("🧹 Выгружаю семантическую модель...", flush=True)
         model_registry["semantic"] = None
         gc.collect()
 
-    # 2. Загружаем детектор (используем model_registry["ai_detector"])
+    # 2. Используем облегченную загрузку через ONNX
     if model_registry["ai_detector"] is None:
-        print("🚀 Инициализация локального детектора ИИ...", flush=True)
-        model_registry["ai_detector"] = pipeline(
-            "text-classification", 
-            model="ss1ree/ai-sentinel-model", 
-            device=-1,
-            model_kwargs={"low_cpu_mem_usage": True}
-        )
+        print("🚀 Инициализация облегченного детектора (ONNX)...", flush=True)
+        try:
+            # optimum автоматически оптимизирует модель под CPU
+            model_registry["ai_detector"] = pipeline(
+                "text-classification", 
+                model="ss1ree/ai-sentinel-model",
+                accelerator="ort" # Использование ONNX Runtime
+            )
+        except Exception as e:
+            print(f"Ошибка загрузки ONNX: {e}. Пробую обычный pipeline...", flush=True)
+            # Если возникли проблемы с ONNX, пробуем минимально возможную версию
+            model_registry["ai_detector"] = pipeline(
+                "text-classification", 
+                model="ss1ree/ai-sentinel-model"
+            )
 
     try:
-        sample_text = " ".join(text.split())[:1500]
-        
-        # ВАЖНО: вызываем объект из словаря, а не detector_pipeline
+        sample_text = " ".join(text.split())[1500]
         result = model_registry["ai_detector"](sample_text, truncation=True, max_length=512)
         
-        # Лог для отладки
-        print(f"DEBUG_TEST_MODEL: {result}", flush=True)
-        
-        # result — это список, берем первый элемент
         res = result[0]
-        label_raw = res['label']
         score = float(res['score'])
+        label_raw = res['label']
         
-        # Маппинг (если LABEL_1 это AI)
+        # Определяем вероятность
         ai_prob = score if label_raw in['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
-        
         label = "AI" if ai_prob > 0.65 else "Human"
-        return label, round(ai_prob, 2), 1
         
+        return label, round(ai_prob, 2), 1
     except Exception as e:
         print(f"Ошибка детектора ИИ: {e}", flush=True)
         return "Error", 0.0, 0
