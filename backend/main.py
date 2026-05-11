@@ -356,7 +356,7 @@ def run_ai_logic(text: str):
             chunks.append(chunk)
 
     # Ограничиваем количество фрагментов, чтобы не перегрузить сервер
-    max_chunks = 10 
+    max_chunks = 5
     chunks = chunks[:max_chunks]
 
     try:
