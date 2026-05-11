@@ -371,7 +371,7 @@ def run_ai_logic(text: str):
             chunks = [chunks[int(i * step)] for i in range(10)]
 
         # 2. Обращение к API Hugging Face
-        API_URL = "https://api-inference.huggingface.co/models/ss1ree/ai-sentinel-model"
+        API_URL = "https://huggingface.co/ss1ree/ai-sentinel-model"
         
         hf_token = os.getenv("HF_TOKEN", "")
         # Если токена нет, Hugging Face часто отдает 403 или 404
