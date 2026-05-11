@@ -14,3 +14,4 @@ bcrypt
 safetensors
 psutil
 requests
+pandas
