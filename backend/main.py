@@ -348,7 +348,7 @@ def run_ai_logic(text: str):
         sample_text = " ".join(text.split())[:1500]
         # Используем truncation=True и max_length=256 для экономии RAM при вычислениях
         result = model_registry["ai_detector"](sample_text, truncation=True, max_length=512)
-        
+        print(f"DEBUG_TEST_MODEL: {result}", flush=True)
         res = result[0]
         score = float(res['score'])
         label_raw = res['label']
