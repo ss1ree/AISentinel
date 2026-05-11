@@ -744,8 +744,18 @@ if (initializing) {
                     
                     <div className="flex items-center gap-4">
                       {/* Очистка */}
-                      {text && (
-                        <button onClick={() => {setText(''); setResult(null);}} className="p-3 text-slate-400 hover:text-red-500 transition-colors cursor-pointer" title="Очистить">
+                      {(text || result) && (
+                        <button 
+                          onClick={() => {
+                            setText(''); 
+                            setResult(null);
+                            // Сбрасываем input файла, чтобы можно было загрузить тот же файл снова
+                            const fileInput = document.getElementById('fup');
+                            if (fileInput) fileInput.value = '';
+                          }} 
+                          className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer" 
+                          title="Очистить поле и результаты"
+                        >
                           <Trash2 size={22} />
                         </button>
                       )}
