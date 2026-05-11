@@ -135,18 +135,12 @@ function App() {
 
   const sendFeedback = async (resultId, isCorrect) => {
     try {
-      const response = await fetch(`${API_URL}/feedback/${resultId}?correct=${isCorrect}`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      
-      if (response.ok) {
-        setFeedbackSent(true); 
-      } else {
-        console.error("Ошибка при отправке фидбека");
-      }
+      // Используем axios, чтобы токен авторизации улетел автоматически
+      await axios.post(`${API_URL}/feedback/${resultId}?correct=${isCorrect}`);
+      setFeedbackSent(true); 
     } catch (error) {
-      console.error("Ошибка сети:", error);
+      console.error("Ошибка при отправке фидбека:", error);
+      alert("Не удалось отправить отзыв. Проверьте подключение.");
     }
   };
 

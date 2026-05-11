@@ -612,7 +612,10 @@ def save_feedback(result_id: int, correct: bool, db: Session = Depends(get_db), 
     # 3. Дописываем данные в balanced_dataset.csv
     file_path = "studying/balanced_dataset.csv"
     try:
-        # 'a' означает append (дозапись в конец файла)
+        # Создаем папку studying, если её вдруг нет (exist_ok=True игнорирует ошибку, если она уже есть)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # 'a' означает append (дозапись в конец файла, если файла нет - он создастся сам)
         with open(file_path, mode='a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             # Очищаем текст от лишних переносов строк, чтобы не сломать CSV структуру
