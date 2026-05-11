@@ -384,9 +384,12 @@ def run_ai_logic(text: str):
             "inputs": chunks,
             "options": {"wait_for_model": True}
         }
-
+        
         # Используем POST, как и было, но добавим проверку токена
         response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+        if response.status_code != 200:
+            print(f"DEBUG: Status {response.status_code}, Response: {response.text}", flush=True)
+            return "Error", 0.0, 0
         
         if response.status_code != 200:
             print(f"Ошибка API Hugging Face: {response.text}", flush=True)

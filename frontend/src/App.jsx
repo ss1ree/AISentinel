@@ -832,7 +832,6 @@ if (initializing) {
                               <div className="feedback-section flex flex-col items-center">
                                 <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Результат верный?</p>
                                 <div className="feedback-section flex flex-col items-center">
-                                <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Результат верный?</p>
                                 
                                 {isFeedbackLoading ? (
                                   <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest h-[32px]">
