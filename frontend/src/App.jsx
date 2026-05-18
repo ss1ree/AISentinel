@@ -917,7 +917,7 @@ if (initializing) {
                               : "text-green-500"
                         } 
                       /> 
-                      Нормоконтроль АПАК
+                      Нормоконтроль
                     </h4>
 
                     {!result || !result.filename?.toLowerCase().endsWith('.docx') ? (
