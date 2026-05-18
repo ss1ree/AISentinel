@@ -645,7 +645,7 @@ if (initializing) {
                   <div className="flex gap-4 mb-6">
                     {[
                       { id: 'ai_enabled', label: 'Детектор ИИ', icon: <Activity size={18}/> },
-                      { id: 'norm_enabled', label: 'Нормоконтроль АПАК', icon: <ShieldCheck size={18}/> }
+                      { id: 'norm_enabled', label: 'Нормоконтроль', icon: <ShieldCheck size={18}/> }
                     ].map((tool) => (
                       <button
                         key={tool.id}
@@ -917,7 +917,7 @@ if (initializing) {
                               : "text-green-500"
                         } 
                       /> 
-                      Нормоконтроль
+                      Нормоконтроль АПАК
                     </h4>
 
                     {!result || !result.filename?.toLowerCase().endsWith('.docx') ? (
