@@ -60,24 +60,24 @@ function App() {
 
   // 1. Проверка текущей сессии при загрузке
   useEffect(() => {
+    const safetyTimer = setTimeout(() => {
+      setInitializing(false);
+    }, 5000);
+
     const checkSession = async () => {
       try {
-        // Мы используем axios.interceptors, поэтому заголовок Authorization 
-        // подставится автоматически, если в localStorage есть токен
         const res = await axios.get(`${API_URL}/me`);
-        
         if (res.data && res.data.email) {
           setUser(res.data);
-          await fetchSettings();
-          await fetchHistory();
-          if (res.data.role === 'admin') {
-            fetchAdminUsers();
-          }
+          await Promise.all([fetchSettings(), fetchHistory()]);
+          if (res.data.role === 'admin') await fetchAdminUsers();
         }
       } catch (err) {
-        console.log("Сессия не найдена или истекла");
+        console.error("Ошибка сессии:", err);
+        localStorage.removeItem('token');
         setUser(null);
       } finally {
+        clearTimeout(safetyTimer); // Отменяем таймер, если загрузились быстрее
         setInitializing(false);
       }
     };
