@@ -1146,22 +1146,27 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             # Проверка шрифта (только если нормоконтроль Включен)
             if settings.norm_enabled and current_block != "figure":
                 try:
+                    # Ожидаемый шрифт из настроек
                     expected_font = str(settings.font_name or "Times New Roman").strip().lower()
-                    found_font = str(f_name).strip().lower() if f_name else ""
-                    name_error = found_font and found_font != expected_font
+                    
+                    # ФИКС: Если f_name остался None, значит Word использует скрытый шрифт темы (Aptos / Calibri)
+                    actual_f_name = f_name if f_name else "Шрифт темы (Aptos / Calibri)"
+                    found_font = str(actual_f_name).strip().lower()
+                    
+                    # Проверяем ошибки
+                    name_error = found_font != expected_font
                     size_error = f_size and abs(round(float(f_size)) - expected_size) > 0.1
                     
                     if size_error or name_error:
                         err_msgs = []
                         if name_error:
-                            # Возвращаем оригинальное имя для красоты вывода
                             disp_name = settings.font_name or "Times New Roman"
-                            errors.append(f"[Гарнитура] Обнаружен {f_name} (нужен {disp_name})")
-                            err_msgs.append(f"Шрифт: {f_name}")
+                            errors.append(f"[Гарнитура] Обнаружен {actual_f_name} (нужен {disp_name})")
+                            err_msgs.append(f"Шрифт: {actual_f_name}")
                         if size_error:
                             errors.append(f"[Размер] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                             err_msgs.append(f"Размер: {round(f_size)}pt")
-
+                            
                         # Формируем подсказку при наведении
                         title_attr = " | ".join(err_msgs)
                         t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='{title_attr}'>{t}</mark>"
