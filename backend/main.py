@@ -61,7 +61,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         frontend_url,
-        "https://ai-sentinel-ppd9-chi.vercel.app",
         "http://localhost:5173"
     ], 
     allow_credentials=True,
