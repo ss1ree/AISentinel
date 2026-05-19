@@ -896,45 +896,70 @@ def convert_doc_to_docx(file_bytes: bytes) -> bytes:
                 print(f"Linux DOC error: {e}", flush=True)
     return file_bytes
 
+# def get_page_count(file_bytes: bytes, filename: str) -> int:
+#     """Считает количество страниц в документе"""
+#     ext = filename.split(".")[-1].lower()
+#     try:
+#         if ext == "pdf":
+#             doc = fitz.open(stream=file_bytes, filetype="pdf")
+#             return doc.page_count
+            
+#         with tempfile.TemporaryDirectory() as temp_dir:
+#             file_path = os.path.join(temp_dir, f"temp.{ext}")
+#             pdf_path = os.path.join(temp_dir, "temp.pdf")
+#             with open(file_path, "wb") as f: f.write(file_bytes)
+
+#             if IS_WINDOWS:
+#                 if ext == "docx":
+#                     # Используем быструю docx2pdf
+#                     convert(file_path, pdf_path)
+#                 elif ext == "rtf":
+#                     pythoncom.CoInitialize()
+#                     word = win32com.client.DispatchEx("Word.Application")
+#                     word.Visible = False
+#                     doc = word.Documents.Open(os.path.abspath(file_path))
+#                     doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17) # 17 = PDF
+#                     doc.Close(0)
+#                     word.Quit()
+#                 elif ext == "txt":
+#                     return max(1, len(file_bytes) // 3000)
+#             else:
+#                 # В облаке (Linux) всё делаем через одну команду LibreOffice
+#                 convert_to_pdf_linux(file_path, temp_dir)
+            
+#             if os.path.exists(pdf_path):
+#                 temp_pdf = fitz.open(pdf_path)
+#                 pages = temp_pdf.page_count
+#                 temp_pdf.close()
+#                 return pages
+        
+#         # Если ничего не помогло - считаем по символам
+#         return max(1, len(file_bytes) // 2500)
+                
+#     except Exception as e:
+#         print(f"Ошибка подсчета страниц: {e}", flush=True)
+#         return 1
 def get_page_count(file_bytes: bytes, filename: str) -> int:
-    """Считает количество страниц в документе"""
+    """Считает количество страниц без тяжелой конвертации LibreOffice"""
     ext = filename.split(".")[-1].lower()
     try:
+        # Для PDF мы можем узнать точное количество страниц через fitz (это легко)
         if ext == "pdf":
             doc = fitz.open(stream=file_bytes, filetype="pdf")
-            return doc.page_count
+            pages = doc.page_count
+            doc.close()
+            return pages
             
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = os.path.join(temp_dir, f"temp.{ext}")
-            pdf_path = os.path.join(temp_dir, "temp.pdf")
-            with open(file_path, "wb") as f: f.write(file_bytes)
-
-            if IS_WINDOWS:
-                if ext == "docx":
-                    # Используем быструю docx2pdf
-                    convert(file_path, pdf_path)
-                elif ext == "rtf":
-                    pythoncom.CoInitialize()
-                    word = win32com.client.DispatchEx("Word.Application")
-                    word.Visible = False
-                    doc = word.Documents.Open(os.path.abspath(file_path))
-                    doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17) # 17 = PDF
-                    doc.Close(0)
-                    word.Quit()
-                elif ext == "txt":
-                    return max(1, len(file_bytes) // 3000)
-            else:
-                # В облаке (Linux) всё делаем через одну команду LibreOffice
-                convert_to_pdf_linux(file_path, temp_dir)
+        # Для DOCX делаем математическую аппроксимацию (1 страница = ~1800 символов)
+        # Это спасет сервер от OOM (Killed) из-за запуска LibreOffice!
+        elif ext == "docx":
+            doc = docx.Document(io.BytesIO(file_bytes))
+            text = "\n".join([p.text for p in doc.paragraphs])
+            return max(1, len(text) // 1800)
             
-            if os.path.exists(pdf_path):
-                temp_pdf = fitz.open(pdf_path)
-                pages = temp_pdf.page_count
-                temp_pdf.close()
-                return pages
-        
-        # Если ничего не помогло - считаем по символам
-        return max(1, len(file_bytes) // 2500)
+        # Для всех остальных форматов (TXT, RTF)
+        else:
+            return max(1, len(file_bytes) // 2500)
                 
     except Exception as e:
         print(f"Ошибка подсчета страниц: {e}", flush=True)
