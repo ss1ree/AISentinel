@@ -940,24 +940,31 @@ def convert_doc_to_docx(file_bytes: bytes) -> bytes:
 #         print(f"Ошибка подсчета страниц: {e}", flush=True)
 #         return 1
 def get_page_count(file_bytes: bytes, filename: str) -> int:
-    """Считает количество страниц без тяжелой конвертации LibreOffice"""
+    """Быстрый подсчет страниц без LibreOffice"""
     ext = filename.split(".")[-1].lower()
     try:
-        # Для PDF мы можем узнать точное количество страниц через fitz (это легко)
+        # 1. Для PDF считаем точно через fitz (PyMuPDF)
         if ext == "pdf":
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             pages = doc.page_count
             doc.close()
             return pages
             
-        # Для DOCX делаем математическую аппроксимацию (1 страница = ~1800 символов)
-        # Это спасет сервер от OOM (Killed) из-за запуска LibreOffice!
+        # 2. Для DOCX читаем встроенные метаданные Word
         elif ext == "docx":
             doc = docx.Document(io.BytesIO(file_bytes))
-            text = "\n".join([p.text for p in doc.paragraphs])
-            return max(1, len(text) // 1800)
+            # Пытаемся достать точное количество страниц, которое сохранил Word
+            pages = getattr(doc.core_properties, "pages", 0)
             
-        # Для всех остальных форматов (TXT, RTF)
+            if pages and pages > 0:
+                return pages
+            else:
+                # Если Word не сохранил метаданные (бывает при сторонних редакторах),
+                # делаем математическую аппроксимацию (1 страница ГОСТ = ~1800 символов)
+                text = "\n".join([p.text for p in doc.paragraphs])
+                return max(1, len(text) // 1800)
+                
+        # 3. Для обычного текста и прочих
         else:
             return max(1, len(file_bytes) // 2500)
                 
