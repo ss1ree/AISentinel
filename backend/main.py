@@ -1083,6 +1083,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                 marker_added = True
                 
             f_size = None
+            f_name = None
             has_explicit_size = False
             
             if run.font and run.font.size:
@@ -1090,25 +1091,50 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                 has_explicit_size = True
             elif p.style and hasattr(p.style, 'font') and p.style.font and p.style.font.size:
                 f_size = p.style.font.size.pt
-                if p.style.name != 'Normal':
-                    has_explicit_size = True
+                if p.style.name != 'Normal': has_explicit_size = True
             elif p.style and hasattr(p.style, 'base_style') and p.style.base_style and hasattr(p.style.base_style, 'font') and p.style.base_style.font and p.style.base_style.font.size:
                 f_size = p.style.base_style.font.size.pt
-                if p.style.base_style.name != 'Normal':
-                    has_explicit_size = True
+                if p.style.base_style.name != 'Normal': has_explicit_size = True
             else:
                 try: 
                     if doc.styles['Normal'].font.size:
                         f_size = doc.styles['Normal'].font.size.pt
                 except: pass
             
+            # --- Извлекаем название шрифта ---
+            if run.font and run.font.name:
+                f_name = run.font.name
+            elif p.style and hasattr(p.style, 'font') and p.style.font and p.style.font.name:
+                f_name = p.style.font.name
+            elif p.style and hasattr(p.style, 'base_style') and p.style.base_style and hasattr(p.style.base_style, 'font') and p.style.base_style.font and p.style.base_style.font.name:
+                f_name = p.style.base_style.font.name
+            else:
+                try:
+                    if doc.styles['Normal'].font.name:
+                        f_name = doc.styles['Normal'].font.name
+                except: pass
+
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
             # Проверка шрифта (только если нормоконтроль Включен)
-            if settings.norm_enabled and current_block != "figure" and f_size and abs(round(f_size) - expected_size) > 0.1:
-                errors.append(f"[Шрифт] Ожидался {expected_size}pt, найден {round(f_size)}pt")
-                t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='Ожидался {expected_size}pt, найден {round(f_size)}pt'>{t}</mark>"
+            if settings.norm_enabled and current_block != "figure":
+                size_error = f_size and abs(round(f_size) - expected_size) > 0.1
+                # Сравниваем названия (в нижнем регистре, чтобы не было проблем с регистрами)
+                name_error = f_name and f_name.lower() != settings.font_name.lower()
+                
+                if size_error or name_error:
+                    err_msgs = []
+                    if name_error:
+                        errors.append(f"[Гарнитура] Обнаружен {f_name} (нужен {settings.font_name})")
+                        err_msgs.append(f"Шрифт: {f_name}")
+                    if size_error:
+                        errors.append(f"[Размер] Ожидался {expected_size}pt, найден {round(f_size)}pt")
+                        err_msgs.append(f"Размер: {round(f_size)}pt")
+                        
+                    # Формируем подсказку при наведении
+                    title_attr = " | ".join(err_msgs)
+                    t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='{title_attr}'>{t}</mark>"
 
             # Проверка пробелов (только если нормоконтроль Включен)
             if settings.norm_enabled and settings.check_apak:
