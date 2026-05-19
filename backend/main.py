@@ -329,8 +329,7 @@ def run_ai_logic(text: str):
 
     # 1. Выгружаем семантику, если она загружена (освобождаем RAM)
     if model_registry["semantic"] is not None:
-        model_registry["semantic"] = None
-        gc.collect()
+        unload_model("semantic")
 
     # 2. Инициализируем детектор (если еще не загружен)
     if model_registry["ai_detector"] is None:
@@ -343,38 +342,37 @@ def run_ai_logic(text: str):
         )
 
     # 3. Sliding Window: Разбивка текста на куски
-    # Убираем лишние пробелы и разбиваем по словам
     words = text.split()
-    chunk_size = 250  # размер окна (в словах)
-    overlap = 50      # перекрытие (чтобы смысл не терялся на стыках)
+    chunk_size = 250  
+    overlap = 50      
     
-    chunks =[]
+    chunks = []
     for i in range(0, len(words), chunk_size - overlap):
         chunk = " ".join(words[i : i + chunk_size])
-        if len(chunk) > 50: # игнорируем слишком короткие куски
+        if len(chunk) > 50:
             chunks.append(chunk)
 
-    # Ограничиваем количество фрагментов, чтобы не перегрузить сервер
     max_chunks = 5
     chunks = chunks[:max_chunks]
 
     try:
-        # Анализируем каждый фрагмент
-        ai_probs =[]
+        ai_probs = []
         for chunk in chunks:
-            # truncation=True обязательно для длинных текстов
-            result = model_registry["ai_detector"](chunk, truncation=True, max_length=512)
+            # ВАЖНО: max_length=256 потребляет в 2-3 раза меньше памяти, чем 512!
+            result = model_registry["ai_detector"](chunk, truncation=True, max_length=256)
             res = result[0]
             
             score = float(res['score'])
             label_raw = res['label']
             
-            # Маппинг: LABEL_1 = AI, LABEL_0 = Human
-            prob = score if label_raw in['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
+            prob = score if label_raw in ['LABEL_1', 'AI', '1', 'FAKE'] else (1.0 - score)
             ai_probs.append(prob)
+            
+            # ВАЖНО: Принудительно чистим мусор после каждого обработанного куска
+            gc.collect()
 
         # 4. Усредняем результат
-        avg_ai_prob = sum(ai_probs) / len(ai_probs)
+        avg_ai_prob = sum(ai_probs) / len(ai_probs) if ai_probs else 0.0
         label = "AI" if avg_ai_prob > 0.65 else "Human"
         
         print(f"DEBUG: Analyzed {len(chunks)} chunks. Avg AI Prob: {avg_ai_prob:.2f}", flush=True)
@@ -508,13 +506,9 @@ async def extract_text_from_file_bytes(file_bytes: bytes, filename: str):
 def check_semantic_rules(doc, settings: database.CheckSettings):
     global model_registry
     from sentence_transformers import SentenceTransformer, util
-    import gc
     
     # Выгружаем ИИ-детектор, чтобы освободить место для rubert-tiny2
-    if model_registry["ai_detector"] is not None:
-        print("🧹 Выгружаю ИИ-детектор для загрузки семантики...", flush=True)
-        model_registry["ai_detector"] = None
-        gc.collect()
+    unload_model("ai_detector")
 
     errors =[]
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
@@ -1222,7 +1216,6 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
     
     unload_model("semantic")
     unload_model("ai_detector")
-    import gc
     gc.collect()
 
     # 7. Считаем страницы
