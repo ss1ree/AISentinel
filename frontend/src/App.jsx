@@ -267,7 +267,7 @@ function App() {
     } else if (result.filename?.toLowerCase().match(/\.(docx|rtf)$/)) {
       formatInfo = `
         <div style="background-color: #f0fdf4; border-left: 6px solid #22c55e; padding: 15px; margin-bottom: 20px;">
-          <h3 style="margin: 0; color: #166534; font-family: sans-serif; font-size: 16px;">Нормоконтроль АПАК: Пройден успешно</h3>
+          <h3 style="margin: 0; color: #166534; font-family: sans-serif; font-size: 16px;">Нормоконтроль: Пройден успешно</h3>
         </div>
       `;
     }
@@ -917,7 +917,7 @@ if (initializing) {
                               : "text-green-500"
                         } 
                       /> 
-                      Нормоконтроль АПАК
+                      Нормоконтроль
                     </h4>
 
                     {!result || !result.filename?.toLowerCase().endsWith('.docx') ? (
