@@ -30,7 +30,6 @@ function App() {
     min_references: 3,
     check_translation: true,
     check_abstract: true,
-    check_expert: true
   });
   const [initializing, setInitializing] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
@@ -1334,7 +1333,6 @@ if (initializing) {
                       {[
                         { label: 'Верификация перевода (RU/EN)', key: 'check_translation', desc: 'Сравнение смысла названия организации на двух языках' },
                         { label: 'Релевантность аннотации', key: 'check_abstract', desc: 'Проверка соответствия краткого содержания основному тексту' },
-                        { label: 'Поиск экспертных заключений', key: 'check_expert', desc: 'Автоматическое обнаружение разрешительных формулировок' },
                         { label: 'Стандарты АПАК (строго)', key: 'check_apak', desc: 'Специфические правила шрифтов (11/12pt) и отступов СибГУ' },
                       ].map((item) => (
                         <div 

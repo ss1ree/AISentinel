@@ -70,7 +70,6 @@ class CheckSettings(Base):
     # Умные проверки (NLP)
     check_translation = Column(Boolean, default=True)
     check_abstract = Column(Boolean, default=True)
-    check_expert = Column(Boolean, default=False)
 
     # Глобальные тумблеры инструментов
     ai_enabled = Column(Boolean, default=True)

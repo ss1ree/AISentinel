@@ -554,9 +554,6 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         print(f"Ошибка в блоке семантики: {e}", flush=True)
         errors.append("[Система] Ошибка NLP модуля")
 
-    if settings.check_expert and not any(word in full_text_lower for word in ["экспертное заключение", "экспортный контроль"]):
-        errors.append("[Экспертиза] Не найдено упоминание об экспертном заключении")
-
     return errors
 
 # Зависимость для получения сессии БД
@@ -783,7 +780,6 @@ def reset_settings(db: Session = Depends(get_db), user: database.User = Depends(
     db_settings.min_references = 3
     db_settings.check_translation = True
     db_settings.check_abstract = True
-    db_settings.check_expert = False
     db_settings.feedback_enabled = True
     db_settings.check_apak = True
     
