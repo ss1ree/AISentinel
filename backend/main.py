@@ -1053,7 +1053,11 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
 
         # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
-        expected_size = 11 if (current_block == "university" or current_block.startswith("table_header")) else settings.font_size
+        if settings.check_apak and (current_block == "university" or current_block.startswith("table_header")):
+            expected_size = 11
+        else:
+            expected_size = settings.font_size
+            
         empty_lines = 0
 
         # СТИЛЬ
@@ -1183,7 +1187,12 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
     if settings.ai_enabled:
         # run_ai_logic теперь возвращает 3 параметра (без подсветки ИИ, так как мы её убрали)
         label, score, chunks = run_ai_logic(text)
-        
+    
+    unload_model("semantic")
+    unload_model("ai_detector")
+    import gc
+    gc.collect()
+
     # 7. Считаем страницы
     page_count = get_page_count(file_bytes, filename)
 
