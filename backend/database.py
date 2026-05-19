@@ -8,7 +8,13 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 # Строка подключения к PostgreSQL в Docker
 # SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost:5432/ai_detector"
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_size=30,           # Базовое количество подключений (хватит на всех)
+    max_overflow=50,        # Сколько можно создать сверх базы при нагрузке
+    pool_timeout=30,        # Время ожидания
+    pool_pre_ping=True      # ВАЖНО: автоматически переподключаться при обрыве связи с Railway БД
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
