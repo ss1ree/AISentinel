@@ -532,8 +532,8 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if settings.check_translation or settings.check_abstract:
             if model_registry["semantic"] is None:
                 print("Загрузка семантической модели (rubert-tiny2)...", flush=True)
-                model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
-                # model_registry["semantic"] = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+                # model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+                model_registry["semantic"] = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
                 
             
             sem_model = model_registry["semantic"]
@@ -972,18 +972,51 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
-    errors =[]
-    html_lines =[]
+    errors = []
+    html_lines = []
     
     current_block = "header" 
     empty_lines = 0
-    valid_single_letters =['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
+    valid_single_letters = ['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
     
     # Флаг: вошли ли мы в секцию библиографии
     in_references_section = False
     prev_p_spacing_after = 0
 
-    for p in doc.paragraphs:
+    # --- 1. ПАКЕТНАЯ ПРОВЕРКА ОРФОГРАФИИ (РОВНО 1 ЗАПРОС НА ВЕСЬ ФАЙЛ) ---
+    paragraphs_to_check = []
+    p_indices = []
+    
+    # Собираем только те абзацы, которые нужно проверить (исключаем УДК, копирайты и таблицы)
+    for idx, p in enumerate(doc.paragraphs):
+        stripped_text = p.text.strip()
+        if len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
+            lower_text = stripped_text.lower()
+            if not (lower_text.startswith("удк") or lower_text.startswith("udc") or "©" in lower_text or "(c)" in lower_text or lower_text.startswith("таблица")):
+                paragraphs_to_check.append(stripped_text)
+                p_indices.append(idx)
+
+    all_speller_results = {}
+    if settings.norm_enabled and settings.check_apak and paragraphs_to_check:
+        try:
+            import requests
+            # Отправляем весь массив абзацев в ОДНОМ запросе (метод checkTexts)
+            response = requests.post(
+                "https://speller.yandex.net/services/spellservice.json/checkTexts",
+                data={"text": paragraphs_to_check, "lang": "ru"},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                results_list = response.json()
+                # Сопоставляем результаты проверки с индексами абзацев в документе
+                for i, p_idx in enumerate(p_indices):
+                    if i < len(results_list):
+                        all_speller_results[p_idx] = results_list[i]
+        except Exception as e:
+            print(f"Ошибка пакетного спеллера: {e}", flush=True)
+
+    # --- 2. ОСНОВНОЙ ЦИКЛ ОБРАБОТКИ ДОКУМЕНТА ---
+    for idx, p in enumerate(doc.paragraphs):
         raw_text = p.text.replace('\t', '    ').replace('\x0c', '')
         stripped_text = raw_text.strip()
         
@@ -996,165 +1029,104 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             continue
             
         lower_text = stripped_text.lower()
-        paragraph_errors = []
+        
+        # --- ИЗВЛЕКАЕМ ОШИБКИ ИЗ НАШЕГО ПАКЕТНОГО ОТВЕТА (БЕЗ СЕТЕВЫХ ЗАПРОСОВ) ---
+        paragraph_errors = all_speller_results.get(idx, [])
         split_words_to_highlight = []
-
-        # Проверяем только если абзац длиннее 5 символов и содержит буквы
-        if settings.norm_enabled and settings.check_apak and len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
+        
+        if paragraph_errors:
             try:
-                import requests
-                # Запрос к бесплатному API Яндекс.Спеллера (таймаут 2 сек, чтобы не вешать сервер)
-                response = requests.get(
-                    "https://speller.yandex.net/services/spellservice.json/checkText",
-                    params={"text": stripped_text, "lang": "ru"},
-                    timeout=2.0
-                )
-                if response.status_code == 200:
-                    paragraph_errors = response.json()
+                words_in_p = re.findall(r'[а-яА-ЯёЁa-zA-Z]+', stripped_text)
+                for err in paragraph_errors:
+                    word = err.get("word")
+                    suggestions = err.get("s") or []
                     
-                    # Разбиваем абзац на слова
-                    words_in_p = re.findall(r'[а-яА-ЯёЁa-zA-Z]+', stripped_text)
-                    for err in paragraph_errors:
-                        word = err.get("word")
-                        suggestions = err.get("s", [])
+                    try:
+                        idx_w = words_in_p.index(word)
+                    except ValueError:
+                        continue
                         
-                        try:
-                            idx = words_in_p.index(word)
-                        except ValueError:
-                            continue
+                    is_split = False
+                    split_combo = ""
+                    
+                    # Склейка со следующим
+                    if idx_w < len(words_in_p) - 1:
+                        next_w = words_in_p[idx_w + 1]
+                        combo = (word + next_w).lower()
+                        if any(s.lower() == combo for s in suggestions):
+                            is_split = True
+                            split_combo = f"{word} {next_w}"
                             
-                        is_split = False
-                        split_combo = ""
-                        
-                        # 1. Проверяем склейку со следующим словом
-                        if idx < len(words_in_p) - 1:
-                            next_w = words_in_p[idx + 1]
-                            combo = (word + next_w).lower()
-                            if any(s.lower() == combo for s in suggestions):
-                                is_split = True
-                                split_combo = f"{word} {next_w}"
-                                
-                        # 2. Проверяем склейку с предыдущим словом
-                        if not is_split and idx > 0:
-                            prev_w = words_in_p[idx - 1]
-                            combo = (prev_w + word).lower()
-                            if any(s.lower() == combo for s in suggestions):
-                                is_split = True
-                                split_combo = f"{prev_w} {word}"
-                                
-                        if is_split:
-                            err_msg = f"[Типографика] Разрыв слова: '{split_combo}'"
-                            if err_msg not in errors:
-                                errors.append(err_msg)
-                            # Запоминаем дефектное слово для подсветки
-                            split_words_to_highlight.append((word, split_combo))
+                    # Склейка с предыдущим
+                    if not is_split and idx_w > 0:
+                        prev_w = words_in_p[idx_w - 1]
+                        combo = (prev_w + word).lower()
+                        if any(s.lower() == combo for s in suggestions):
+                            is_split = True
+                            split_combo = f"{prev_w} {word}"
+                            
+                    if is_split:
+                        err_msg = f"[Типографика] Разрыв слова: '{split_combo}'"
+                        if err_msg not in errors:
+                            errors.append(err_msg)
+                        split_words_to_highlight.append((word, split_combo))
             except Exception as e:
-                print(f"Ошибка проверки спеллера: {e}", flush=True)
+                print(f"Ошибка маппинга разрывов: {e}", flush=True)
 
-        # --- 1. УМНОЕ ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
-        alignment = "justify" 
-        indent = "1.25cm" # Стандартный абзацный отступ ГОСТ
+        # --- ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
+        alignment = "justify"; indent = "1.25cm"
         is_bold_override = False
         is_italic_override = False
         is_spacing_error = False 
         is_figure_caption = stripped_text.startswith("Рис.") or stripped_text.startswith("Fig.")
         is_list_item = bool(p._element.xpath('.//w:numPr'))
         
-        # 1. УДК (Слева)
         if lower_text.startswith("удк") or lower_text.startswith("udc"):
-            current_block = "udk"
-            alignment = "left"
-            indent = "0"
-        
+            current_block = "udk"; alignment = "left"; indent = "0"
         elif lower_text.startswith("таблица"):
             current_block = "table_header_index"; alignment = "right"; indent = "0"; is_italic_override = True
         elif current_block == "table_header_index" and len(stripped_text) < 100:
             current_block = "table_header_title"; alignment = "center"; indent = "0"; is_bold_override = True
-
-        # 2. Копирайт (Справа)
         elif "©" in lower_text or "(c)" in lower_text:
-            current_block = "copyright"
-            alignment = "right"
-            indent = "0"
-            
+            current_block = "copyright"; alignment = "right"; indent = "0"
             total_gap = (empty_lines * 14) + prev_p_spacing_after
-            
-            if settings.norm_enabled and settings.check_apak:
-                if total_gap < 10 or total_gap > 30:
-                    errors.append(f"[АПАК] Неверный интервал перед копирайтом")
-                    is_spacing_error = True
-        
-        # 3. Заголовки "Библиографические ссылки" / "Список литературы" (По центру, жирным)
+            if settings.norm_enabled and settings.check_apak and (total_gap < 10 or total_gap > 30):
+                errors.append(f"[АПАК] Неверный интервал перед копирайтом"); is_spacing_error = True
         elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
-            current_block = "references_header"
-            alignment = "center"
-            indent = "0"
-            in_references_section = True
-            is_bold_override = True # Принудительно делаем жирным
-            
-        # 4. Если мы вошли в секцию ссылок, то сами ссылки по ширине без отступа
+            current_block = "references_header"; alignment = "center"; indent = "0"; in_references_section = True; is_bold_override = True
         elif in_references_section:
-            current_block = "reference_item"
-            alignment = "justify"
-            indent = "0" 
-            
-        # 5. Аннотация и ключевые слова (По центру)
-        elif lower_text.startswith("аннотация") or lower_text.startswith("abstract") or lower_text.startswith("ключевые слова") or lower_text.startswith("keywords"):
-            current_block = "abstract"
-            alignment = "center"
-            indent = "0"
-            
-        # 6. Картинки и подписи (По центру)
+            current_block = "reference_item"; alignment = "justify"; indent = "0" 
+        elif lower_text.startswith(("аннотация", "abstract", "ключевые слова", "keywords")):
+            current_block = "abstract"; alignment = "center"; indent = "0"
         elif is_figure_caption or has_image:
-            current_block = "figure"
-            alignment = "center"
-            indent = "0"
-            
-        # 7. Университет / Email (По центру)
+            current_block = "figure"; alignment = "center"; indent = "0"
         elif any(x in lower_text for x in["сибирский государственный", "reshetnev", "university", "федеральное", "г. красноярск", "krasnoyarsk", "просп.", "prospekt", "e-mail", "mail.ru", "yandex.ru", "gmail.com"]):
-            current_block = "university"
-            alignment = "center"
-            indent = "0"
-            
-        # 8. ФИО, Руководитель, Название статьи, Заголовки (Всё короткое -> По центру)
+            current_block = "university"; alignment = "center"; indent = "0"
         elif len(stripped_text) < 100 and not is_list_item and not stripped_text.endswith((";", ":", ",", "»", '"', "-")):
-            current_block = "heading_or_title"
-            alignment = "center"
-            indent = "0"
-            
-        # 9. Основной длинный текст (По ширине - Justify)
+            current_block = "heading_or_title"; alignment = "center"; indent = "0"
         else:
-            current_block = "main"
-            alignment = "justify"
-            indent = "1.25cm"
+            current_block = "main"; alignment = "justify"; indent = "1.25cm"
 
-        prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
-
-        # --- 2. УСТАНОВКА ОЖИДАЕМОГО РАЗМЕРА ---
+        # Установка ожидаемого размера
         if settings.check_apak and (current_block == "university" or current_block.startswith("table_header")):
             expected_size = 11
         else:
             expected_size = settings.font_size
-            
         empty_lines = 0
 
         # СТИЛЬ
         p_style = f"margin: 0; line-height: 1.5; white-space: pre-wrap; vertical-align: baseline; font-family: 'Times New Roman', serif; text-align: {alignment}; text-indent: {indent}; "
-        
         if is_bold_override: p_style += "font-weight: bold; "
         if is_italic_override: p_style += "font-style: italic; "
         if is_spacing_error: p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
 
         p_html = f'<p style="{p_style}">'
-        
-        # ВАЖНО: Эта переменная должна быть ровно здесь, ПЕРЕД циклом runs!
         marker_added = False 
         
         for run in p.runs:
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
             
-            # Восстанавливаем маркер списка (тире)
             if is_list_item and not marker_added and t.strip():
                 if not t.strip().startswith(("–", "-", "—", "•")):
                     t = f"–&nbsp;&nbsp;&nbsp;{t}"
@@ -1178,8 +1150,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                     if doc.styles['Normal'].font.size:
                         f_size = doc.styles['Normal'].font.size.pt
                 except: pass
-            
-            # --- Извлекаем название шрифта ---
+                
             if run.font and run.font.name:
                 f_name = run.font.name
             elif p.style and hasattr(p.style, 'font') and p.style.font and p.style.font.name:
@@ -1191,21 +1162,17 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                     if doc.styles['Normal'].font.name:
                         f_name = doc.styles['Normal'].font.name
                 except: pass
-
+            
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            # Проверка шрифта (только если нормоконтроль Включен)
+            # Проверка шрифта
             if settings.norm_enabled and current_block != "figure":
                 try:
-                    # Ожидаемый шрифт из настроек
                     expected_font = str(settings.font_name or "Times New Roman").strip().lower()
-                    
-                    # ФИКС: Если f_name остался None, значит Word использует скрытый шрифт темы (Aptos / Calibri)
                     actual_f_name = f_name if f_name else "Шрифт темы (Aptos / Calibri)"
                     found_font = str(actual_f_name).strip().lower()
                     
-                    # Проверяем ошибки
                     name_error = found_font != expected_font
                     size_error = f_size and abs(round(float(f_size)) - expected_size) > 0.1
                     
@@ -1219,21 +1186,19 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                             errors.append(f"[Размер] Ожидался {expected_size}pt, найден {round(f_size)}pt")
                             err_msgs.append(f"Размер: {round(f_size)}pt")
                             
-                        # Формируем подсказку при наведении
                         title_attr = " | ".join(err_msgs)
                         t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='{title_attr}'>{t}</mark>"
                 except Exception as e:
                     print(f"Ошибка парсинга шрифта: {e}", flush=True)
 
-            # Проверка пробелов (только если нормоконтроль Включен)
+            # Проверка пробелов и разрывов слов (БЕЗ СЕТЕВЫХ ЗАПРОСОВ)
             if settings.norm_enabled and settings.check_apak:
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
                     t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
 
-                # ПОДСВЕЧИВАЕМ ИСПРАВЛЕННЫЕ РАЗРЫВЫ СЛОВ
+                # Подсвечиваем разрывы слов
                 for bad_word, combo_desc in split_words_to_highlight:
-                    # Подсвечиваем только целое слово, используя границы \b
                     pattern = rf'\b{bad_word}\b'
                     if re.search(pattern, t):
                         t = re.sub(
@@ -1248,6 +1213,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             
         p_html += "</p>"
         html_lines.append(p_html)
+        prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
 
     return "".join(html_lines), list(dict.fromkeys(errors))
 
