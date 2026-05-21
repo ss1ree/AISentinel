@@ -1001,10 +1001,14 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     if settings.norm_enabled and settings.check_apak and paragraphs_to_check:
         try:
             import requests
+            # Формируем гарантированно правильный формат данных для POST-запроса
+            payload_data = [('text', p) for p in paragraphs_to_check]
+            payload_data.append(('lang', 'ru'))
+            
             # Отправляем весь массив абзацев в ОДНОМ запросе (метод checkTexts)
             response = requests.post(
                 "https://speller.yandex.net/services/spellservice.json/checkTexts",
-                data={"text": paragraphs_to_check, "lang": "ru"},
+                data=payload_data,
                 timeout=5.0
             )
             if response.status_code == 200:
@@ -1037,50 +1041,50 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         
         if paragraph_errors:
             try:
+                import difflib # Используем встроенную библиотеку для нечеткого сравнения текстов
                 words_in_p = re.findall(r'[а-яА-ЯёЁa-zA-Z]+', stripped_text)
                 for err in paragraph_errors:
-                    word = err.get("word") # Это слово будет в нижнем регистре
+                    word = err.get("word")
                     suggestions = err.get("s") or []
                     
-                    # Ищем индекс слова в оригинальном списке слов без учета регистра
-                    idx_w = -1
-                    for j, w_p in enumerate(words_in_p):
-                        if w_p.lower() == word.lower():
-                            idx_w = j
-                            break
-                            
-                    if idx_w == -1:
+                    try:
+                        idx_w = words_in_p.index(word)
+                    except ValueError:
                         continue
                         
                     is_split = False
                     split_combo = ""
                     word_to_highlight = ""
                     
-                    # Склейка со следующим
+                    # 1. Склейка со следующим словом
                     if idx_w < len(words_in_p) - 1:
                         next_w = words_in_p[idx_w + 1]
-                        combo = (word.lower() + next_w.lower())
-                        if any(s.lower() == combo for s in suggestions):
-                            is_split = True
-                            # Сохраняем оригинальный регистр букв для вывода
-                            split_combo = f"{words_in_p[idx_w]} {next_w}"
-                            word_to_highlight = words_in_p[idx_w]
+                        combo = (word + next_w).lower()
+                        for s in suggestions:
+                            # Если схожесть склейки и словарного слова >= 85% (ловит "руководитель" и "руководитель")
+                            sim = difflib.SequenceMatcher(None, s.lower(), combo).ratio()
+                            if sim >= 0.85:
+                                is_split = True
+                                split_combo = f"{words_in_p[idx_w]} {next_w}"
+                                word_to_highlight = words_in_p[idx_w]
+                                break
                             
-                    # Склейка с предыдущим
+                    # 2. Склейка с предыдущим словом
                     if not is_split and idx_w > 0:
                         prev_w = words_in_p[idx_w - 1]
-                        combo = (prev_w.lower() + word.lower())
-                        if any(s.lower() == combo for s in suggestions):
-                            is_split = True
-                            # Сохраняем оригинальный регистр букв для вывода
-                            split_combo = f"{prev_w} {words_in_p[idx_w]}"
-                            word_to_highlight = words_in_p[idx_w]
+                        combo = (prev_w + word).lower()
+                        for s in suggestions:
+                            sim = difflib.SequenceMatcher(None, s.lower(), combo).ratio()
+                            if sim >= 0.85:
+                                is_split = True
+                                split_combo = f"{prev_w} {words_in_p[idx_w]}"
+                                word_to_highlight = words_in_p[idx_w]
+                                break
                             
                     if is_split:
                         err_msg = f"[Типографика] Разрыв слова: '{split_combo}'"
                         if err_msg not in errors:
                             errors.append(err_msg)
-                        # Запоминаем оригинальное написание слова для точечной подсветки
                         split_words_to_highlight.append((word_to_highlight, split_combo))
             except Exception as e:
                 print(f"Ошибка маппинга разрывов: {e}", flush=True)
@@ -1119,7 +1123,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         else:
             current_block = "main"; alignment = "justify"; indent = "1.25cm"
 
-        # Установка ожидаемого размера (11pt только если включен АПАК, иначе берем из настроек)
+        # Установка ожидаемого размера
         if settings.check_apak and (current_block == "university" or current_block.startswith("table_header")):
             expected_size = 11
         else:
