@@ -532,8 +532,8 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if settings.check_translation or settings.check_abstract:
             if model_registry["semantic"] is None:
                 print("Загрузка семантической модели (rubert-tiny2)...", flush=True)
-                # model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
-                model_registry["semantic"] = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+                model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+                # model_registry["semantic"] = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
                 
             
             sem_model = model_registry["semantic"]
