@@ -993,7 +993,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
             lower_text = stripped_text.lower()
             if not (lower_text.startswith("удк") or lower_text.startswith("udc") or "©" in lower_text or "(c)" in lower_text or lower_text.startswith("таблица")):
-                paragraphs_to_check.append(stripped_text)
+                # ВАЖНО: Приводим к нижнему регистру перед отправкой, чтобы обойти игнорирование слов в ВЕРХНЕМ РЕГИСТРЕ!
+                paragraphs_to_check.append(stripped_text.lower())
                 p_indices.append(idx)
 
     all_speller_results = {}
