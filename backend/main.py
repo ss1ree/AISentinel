@@ -993,7 +993,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
             lower_text = stripped_text.lower()
             if not (lower_text.startswith("удк") or lower_text.startswith("udc") or "©" in lower_text or "(c)" in lower_text or lower_text.startswith("таблица")):
-                # ВАЖНО: Приводим к нижнему регистру перед отправкой, чтобы обойти игнорирование слов в ВЕРХНЕМ РЕГИСТРЕ!
+                # Приводим к нижнему регистру перед отправкой, чтобы обойти игнорирование слов в ВЕРХНЕМ РЕГИСТРЕ!
                 paragraphs_to_check.append(stripped_text.lower())
                 p_indices.append(idx)
 
@@ -1039,38 +1039,49 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             try:
                 words_in_p = re.findall(r'[а-яА-ЯёЁa-zA-Z]+', stripped_text)
                 for err in paragraph_errors:
-                    word = err.get("word")
+                    word = err.get("word") # Это слово будет в нижнем регистре
                     suggestions = err.get("s") or []
                     
-                    try:
-                        idx_w = words_in_p.index(word)
-                    except ValueError:
+                    # Ищем индекс слова в оригинальном списке слов без учета регистра
+                    idx_w = -1
+                    for j, w_p in enumerate(words_in_p):
+                        if w_p.lower() == word.lower():
+                            idx_w = j
+                            break
+                            
+                    if idx_w == -1:
                         continue
                         
                     is_split = False
                     split_combo = ""
+                    word_to_highlight = ""
                     
                     # Склейка со следующим
                     if idx_w < len(words_in_p) - 1:
                         next_w = words_in_p[idx_w + 1]
-                        combo = (word + next_w).lower()
+                        combo = (word.lower() + next_w.lower())
                         if any(s.lower() == combo for s in suggestions):
                             is_split = True
-                            split_combo = f"{word} {next_w}"
+                            # Сохраняем оригинальный регистр букв для вывода
+                            split_combo = f"{words_in_p[idx_w]} {next_w}"
+                            word_to_highlight = words_in_p[idx_w]
                             
                     # Склейка с предыдущим
                     if not is_split and idx_w > 0:
                         prev_w = words_in_p[idx_w - 1]
-                        combo = (prev_w + word).lower()
+                        combo = (prev_w.lower() + word.lower())
                         if any(s.lower() == combo for s in suggestions):
                             is_split = True
-                            split_combo = f"{prev_w} {word}"
+                            # Сохраняем оригинальный регистр букв для вывода
+                            split_combo = f"{prev_w} {words_in_p[idx_w]}"
+                            word_to_highlight = words_in_p[idx_w]
                             
                     if is_split:
                         err_msg = f"[Типографика] Разрыв слова: '{split_combo}'"
                         if err_msg not in errors:
                             errors.append(err_msg)
-                        split_words_to_highlight.append((word, split_combo))
+                        # Запоминаем оригинальное написание слова для точечной подсветки
+                        split_words_to_highlight.append((word_to_highlight, split_combo))
             except Exception as e:
                 print(f"Ошибка маппинга разрывов: {e}", flush=True)
 
@@ -1108,7 +1119,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         else:
             current_block = "main"; alignment = "justify"; indent = "1.25cm"
 
-        # Установка ожидаемого размера
+        # Установка ожидаемого размера (11pt только если включен АПАК, иначе берем из настроек)
         if settings.check_apak and (current_block == "university" or current_block.startswith("table_header")):
             expected_size = 11
         else:
