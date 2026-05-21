@@ -532,7 +532,9 @@ def check_semantic_rules(doc, settings: database.CheckSettings):
         if settings.check_translation or settings.check_abstract:
             if model_registry["semantic"] is None:
                 print("Загрузка семантической модели (rubert-tiny2)...", flush=True)
-                model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+                # model_registry["semantic"] = SentenceTransformer('cointegrated/rubert-tiny2', device="cpu")
+                model_registry["semantic"] = SentenceTransformer('sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2', device="cpu")
+                
             
             sem_model = model_registry["semantic"]
 
@@ -994,7 +996,61 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             continue
             
         lower_text = stripped_text.lower()
-        
+        paragraph_errors = []
+        split_words_to_highlight = []
+
+        # Проверяем только если абзац длиннее 5 символов и содержит буквы
+        if settings.norm_enabled and settings.check_apak and len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
+            try:
+                import requests
+                # Запрос к бесплатному API Яндекс.Спеллера (таймаут 2 сек, чтобы не вешать сервер)
+                response = requests.get(
+                    "https://speller.yandex.net/services/spellservice.json/checkText",
+                    params={"text": stripped_text, "lang": "ru"},
+                    timeout=2.0
+                )
+                if response.status_code == 200:
+                    paragraph_errors = response.json()
+                    
+                    # Разбиваем абзац на слова
+                    words_in_p = re.findall(r'[а-яА-ЯёЁa-zA-Z]+', stripped_text)
+                    for err in paragraph_errors:
+                        word = err.get("word")
+                        suggestions = err.get("s", [])
+                        
+                        try:
+                            idx = words_in_p.index(word)
+                        except ValueError:
+                            continue
+                            
+                        is_split = False
+                        split_combo = ""
+                        
+                        # 1. Проверяем склейку со следующим словом
+                        if idx < len(words_in_p) - 1:
+                            next_w = words_in_p[idx + 1]
+                            combo = (word + next_w).lower()
+                            if any(s.lower() == combo for s in suggestions):
+                                is_split = True
+                                split_combo = f"{word} {next_w}"
+                                
+                        # 2. Проверяем склейку с предыдущим словом
+                        if not is_split and idx > 0:
+                            prev_w = words_in_p[idx - 1]
+                            combo = (prev_w + word).lower()
+                            if any(s.lower() == combo for s in suggestions):
+                                is_split = True
+                                split_combo = f"{prev_w} {word}"
+                                
+                        if is_split:
+                            err_msg = f"[Типографика] Разрыв слова: '{split_combo}'"
+                            if err_msg not in errors:
+                                errors.append(err_msg)
+                            # Запоминаем дефектное слово для подсветки
+                            split_words_to_highlight.append((word, split_combo))
+            except Exception as e:
+                print(f"Ошибка проверки спеллера: {e}", flush=True)
+
         # --- 1. УМНОЕ ОПРЕДЕЛЕНИЕ БЛОКА И ВЫРАВНИВАНИЯ ---
         alignment = "justify" 
         indent = "1.25cm" # Стандартный абзацный отступ ГОСТ
@@ -1175,18 +1231,16 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                     errors.append(f"[Пробелы] Лишние пробелы")
                     t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
 
-                def sub_standalone(m):
-                    letter = m.group(2)
-                    if letter.lower() not in valid_single_letters:
-                        errors.append(f"[Типографика] Разрыв слова '{letter}'")
-                        return f"{m.group(1)}<mark style='background-color: #ffedd5; outline: 1px solid #ea580c; outline-offset: -1px;'>{letter}</mark> "
-                    return m.group(0)
-                t = re.sub(r'(^|\s)([а-яА-ЯёЁ])\s', sub_standalone, t)
-
-                def sub_illegal_start(m):
-                    errors.append(f"[Типографика] Разрыв слова")
-                    return f"{m.group(1)}<mark style='background-color: #ffedd5; outline: 1px solid #ea580c;'>{m.group(2)}</mark>{m.group(3)}"
-                t = re.sub(r'(^|\s)([ьыъЬЫЪ])([а-яА-ЯёЁ]+)', sub_illegal_start, t)
+                # ПОДСВЕЧИВАЕМ ИСПРАВЛЕННЫЕ РАЗРЫВЫ СЛОВ
+                for bad_word, combo_desc in split_words_to_highlight:
+                    # Подсвечиваем только целое слово, используя границы \b
+                    pattern = rf'\b{bad_word}\b'
+                    if re.search(pattern, t):
+                        t = re.sub(
+                            pattern, 
+                            f"<mark style='background-color: #ffedd5; outline: 1px solid #ea580c;' title='Разрыв слова: {combo_desc}'>{bad_word}</mark>", 
+                            t
+                        )
 
             if run.bold: t = f"<b>{t}</b>"
             if run.italic: t = f"<i>{t}</i>"
