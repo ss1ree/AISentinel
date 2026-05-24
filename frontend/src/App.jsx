@@ -459,7 +459,7 @@ if (initializing) {
   // --- ЭКРАН АВТОРИЗАЦИИ ---
   if (!user) {
     return (
-      <div className="h-screen w-full flex overflow-hidden bg-white">
+      <div className="h-screen w-full flex overflow-hidden bg-white relative">
         
         {/* ЛЕВАЯ ЧАСТЬ (Брендинг - 50% ширины) */}
         <div className="hidden lg:flex lg:w-1/2 bg-blue-600 p-20 flex-col justify-between text-white relative">
@@ -469,18 +469,15 @@ if (initializing) {
               <span className="text-4xl font-black tracking-tighter uppercase">AI Sentinel</span>
             </div>
             
-            {/* ОБНОВЛЕННЫЙ ЗАГОЛОВОК */}
             <h2 className="text-[clamp(2.5rem,2vw,4.5rem)] font-black leading-[1.05] tracking-tight break-words">
               Комплексная система <br /> верификации <br /> и нормоконтроля
             </h2>
             
-            {/* ОБНОВЛЕННОЕ ОПИСАНИЕ */}
             <p className="mt-10 text-blue-100 text-xl leading-relaxed max-w-xl font-medium">
               Автоматизированная среда анализа научных публикаций СибГУ им. М.Ф. Решетнева: от технического соответствия АПАК до детекции признаков генерации нейросетями.
             </p>
           </div>
           
-          {/* Декоративные элементы */}
           <div className="absolute -bottom-20 -left-20 w-96 h-96 bg-blue-500 rounded-full opacity-50 blur-3xl"></div>
           <div className="absolute top-1/2 -right-20 w-64 h-64 bg-blue-400 rounded-full opacity-30 blur-3xl"></div>
         </div>
@@ -523,7 +520,6 @@ if (initializing) {
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)}
                 />
-                {/* Кнопка переключения видимости */}
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
@@ -537,6 +533,8 @@ if (initializing) {
                 {authMode === 'login' ? 'Войти в систему' : 'Зарегистрироваться'}
               </button>
             </form>
+
+            {/* Ссылка на политику конфиденциальности */}
             <p className="text-slate-400 text-[11px] text-center mt-6 font-medium">
               Регистрируясь в системе, вы соглашаетесь с{' '}
               <button 
@@ -559,6 +557,31 @@ if (initializing) {
             </div>
           </div>
         </div>
+
+        {/* ВСПЛЫВАЮЩЕЕ ОКНО (Монтируется прямо внутри экрана авторизации) */}
+        {showPrivacyModal && (
+          <div className="fixed inset-0 z-[250] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-[32px] shadow-2xl max-w-2xl w-full p-10 max-h-[80vh] overflow-y-auto relative animate-in fade-in zoom-in duration-300">
+              <h3 className="text-2xl font-black text-slate-900 mb-6 uppercase tracking-tight text-left">Политика конфиденциальности</h3>
+              <div className="space-y-4 text-xs text-slate-600 leading-relaxed font-semibold uppercase text-left">
+                <p>Настоящая Политика определяет порядок обработки и защиты персональных данных пользователей Системы «AI Sentinel» [13].</p>
+                <h4 className="font-black text-slate-800 text-[10px] tracking-wider mt-4">1. Какие данные мы обрабатываем</h4>
+                <p>Мы собираем только минимально необходимый набор данных для авторизации: адрес электронной почты (email), хэшированный пароль и тексты загружаемых научных работ [13].</p>
+                <h4 className="font-black text-slate-800 text-[10px] tracking-wider mt-4">2. Цели обработки</h4>
+                <p>Данные обрабатываются исключительно в целях предоставления доступа к личному кабинету, сохранения истории проверок, формирования отчетов нормоконтроля и верификации оригинальности научных трудов [13].</p>
+                <h4 className="font-black text-slate-800 text-[10px] tracking-wider mt-4">3. Безопасность и третьи лица</h4>
+                <p>Мы гарантируем конфиденциальность. Ваши данные и тексты работ не передаются третьим лицам. Для детекции ИИ-генерации тексты передаются по защищенному шифрованному каналу API [13].</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowPrivacyModal(false)}
+                className="mt-8 w-full py-5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all uppercase tracking-widest text-[10px] cursor-pointer"
+              >
+                Принять и закрыть
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     );
