@@ -45,7 +45,6 @@ function App() {
   const [adminSearch, setAdminSearch] = useState('');
   const [adminSort, setAdminSort] = useState({ key: 'id', direction: 'asc' });
   const [showAllAdminUsers, setShowAllAdminUsers] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   // Состояния авторизации
