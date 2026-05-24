@@ -144,6 +144,14 @@ def unload_model(model_key):
         torch.cuda.empty_cache() # Если есть GPU
         import gc
         gc.collect()
+        
+        try:
+            import ctypes
+            # Вызываем malloc_trim из стандартной библиотеки libc.so.6
+            ctypes.CDLL('libc.so.6').malloc_trim(0)
+            print("📊 [ПАМЯТЬ] Свободная память успешно возвращена операционной системе Linux", flush=True)
+        except Exception as e:
+            print(f"⚠️ Не удалось вызвать malloc_trim (возможно, ОС не Linux): {e}", flush=True)
 
 def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)):
     if not authorization or not authorization.startswith("Bearer "):
