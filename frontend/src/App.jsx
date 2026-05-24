@@ -711,19 +711,22 @@ if (initializing) {
                     <div className={`w-2 h-2 rounded-full ${settings.feedback_enabled ? 'bg-white animate-pulse' : 'bg-slate-300'}`}></div>
                   </button>
                   {result ? (
-                    <div id="printable-report" className="relative bg-white min-h-[450px]">
-                      {/* Шапка для печати (видна только на бумаге) */}
-                      <div className="hidden print:block p-8 border-b-2 border-slate-200 mb-8">
-                        <h1 className="text-3xl font-black text-slate-900 uppercase">Отчет верификации AI Sentinel</h1>
-                        <p className="text-slate-500 mt-2 font-bold">Проверено: {user?.email} | Документ: {result.filename || 'Введенный текст'}</p>
+                    <div id="printable-report" className="relative bg-white min-h-[450px] shadow-inner border border-slate-100 rounded-[32px] p-10">
+                      {/* Шапка для печати (видна только на бумаге / в PDF) */}
+                      <div className="hidden print:block border-b-2 border-slate-200 pb-6 mb-8">
+                        <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Отчет верификации AI Sentinel</h1>
+                        <p className="text-slate-500 mt-2 font-bold text-sm">Проверено: {user?.email} | Документ: {result.filename || 'Введенный текст'}</p>
                       </div>
+                      
+                      {/* Если это файл и есть HTML-разметка */}
                       {result.html_content ? (
                         <div 
-                          className="text-left prose max-w-none p-10 text-slate-700 leading-relaxed font-serif print:p-0"
+                          className="text-left prose max-w-none text-slate-700 leading-relaxed font-serif print:p-0"
                           dangerouslySetInnerHTML={{ __html: result.html_content }} 
                         />
                       ) : (
-                        <div className="text-left prose max-w-none p-10 text-slate-700 leading-relaxed font-serif print:p-0 whitespace-pre-wrap">
+                        /* Если это просто написанный вручную текст */
+                        <div className="text-left prose max-w-none text-slate-700 leading-relaxed font-serif print:p-0 whitespace-pre-wrap text-lg">
                           {text}
                         </div>
                       )}
@@ -732,7 +735,8 @@ if (initializing) {
                     <textarea 
                       className="w-full h-[450px] p-10 focus:outline-none focus:ring-4 focus:ring-blue-50/50 text-xl leading-relaxed text-slate-700 placeholder-slate-300 resize-none transition-all"
                       placeholder="Вставьте фрагмент текста или загрузите файл (.docx, .rtf) для полной проверки..."
-                      value={text} onChange={(e) => setText(e.target.value)}
+                      value={text} 
+                      onChange={(e) => setText(e.target.value)}
                     />
                   )}
                   <div className="relative overflow-hidden flex justify-between items-center p-8 bg-slate-50/50 border-t border-slate-100">
