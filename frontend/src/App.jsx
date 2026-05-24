@@ -45,6 +45,8 @@ function App() {
   const [adminSearch, setAdminSearch] = useState('');
   const [adminSort, setAdminSort] = useState({ key: 'id', direction: 'asc' });
   const [showAllAdminUsers, setShowAllAdminUsers] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   // Состояния авторизации
   const [user, setUser] = useState(null);
@@ -536,6 +538,16 @@ if (initializing) {
                 {authMode === 'login' ? 'Войти в систему' : 'Зарегистрироваться'}
               </button>
             </form>
+            <p className="text-slate-400 text-[11px] text-center mt-6 font-medium">
+              Регистрируясь в системе, вы соглашаетесь с{' '}
+              <button 
+                type="button"
+                onClick={() => setShowPrivacyModal(true)} 
+                className="text-blue-600 font-bold hover:underline cursor-pointer"
+              >
+                Политикой обработки персональных данных
+              </button>
+            </p>
 
             <div className="mt-10 text-center">
               <button 
@@ -698,17 +710,23 @@ if (initializing) {
                     {/* ИНДИКАТОР СОСТОЯНИЯ (точка) */}
                     <div className={`w-2 h-2 rounded-full ${settings.feedback_enabled ? 'bg-white animate-pulse' : 'bg-slate-300'}`}></div>
                   </button>
-                  {result && result.html_content ? (
+                  {result ? (
                     <div id="printable-report" className="relative bg-white min-h-[450px]">
                       {/* Шапка для печати (видна только на бумаге) */}
                       <div className="hidden print:block p-8 border-b-2 border-slate-200 mb-8">
-                        <h1 className="text-3xl font-black text-slate-900 uppercase">AI Sentinel Report</h1>
-                        <p className="text-slate-500 mt-2 font-bold">Проверено: {user?.email} | Документ: {result.filename || 'Текст'}</p>
+                        <h1 className="text-3xl font-black text-slate-900 uppercase">Отчет верификации AI Sentinel</h1>
+                        <p className="text-slate-500 mt-2 font-bold">Проверено: {user?.email} | Документ: {result.filename || 'Введенный текст'}</p>
                       </div>
-                      <div 
-                        className="text-left prose max-w-none p-10 text-slate-700 leading-relaxed font-serif print:p-0"
-                        dangerouslySetInnerHTML={{ __html: result.html_content }} 
-                      />
+                      {result.html_content ? (
+                        <div 
+                          className="text-left prose max-w-none p-10 text-slate-700 leading-relaxed font-serif print:p-0"
+                          dangerouslySetInnerHTML={{ __html: result.html_content }} 
+                        />
+                      ) : (
+                        <div className="text-left prose max-w-none p-10 text-slate-700 leading-relaxed font-serif print:p-0 whitespace-pre-wrap">
+                          {text}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <textarea 
@@ -1410,6 +1428,28 @@ if (initializing) {
           </div>
         </div>
       )} */}
+      {showPrivacyModal && (
+        <div className="fixed inset-0 z-[250] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[32px] shadow-2xl max-w-2xl w-full p-10 max-h-[80vh] overflow-y-auto relative animate-in fade-in zoom-in duration-300">
+            <h3 className="text-2xl font-black text-slate-900 mb-6 uppercase tracking-tight">Политика конфиденциальности</h3>
+            <div className="space-y-4 text-xs text-slate-600 leading-relaxed font-semibold uppercase">
+              <p>Настоящая Политика определяет порядок обработки и защиты персональных данных пользователей Системы «AI Sentinel» [13].</p>
+              <h4 className="font-black text-slate-800 text-[10px] tracking-wider mt-4">1. Какие данные мы обрабатываем</h4>
+              <p>Мы собираем только минимально необходимый набор данных для авторизации: адрес электронной почты (email), хэшированный пароль и тексты загружаемых научных работ [13].</p>
+              <h4 className="font-black text-slate-800 text-[10px] tracking-wider mt-4">2. Цели обработки</h4>
+              <p>Данные обрабатываются исключительно в целях предоставления доступа к личному кабинету, сохранения истории проверок, формирования отчетов нормоконтроля и верификации оригинальности научных трудов [13].</p>
+              <h4 className="font-black text-slate-800 text-[10px] tracking-wider mt-4">3. Безопасность и третьи лица</h4>
+              <p>Мы гарантируем конфиденциальность. Ваши данные и тексты работ не передаются третьим лицам. Для детекции ИИ-генерации тексты передаются по защищенному шифрованному каналу API [13].</p>
+            </div>
+            <button 
+              onClick={() => setShowPrivacyModal(false)}
+              className="mt-8 w-full py-5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all uppercase tracking-widest text-[10px] cursor-pointer"
+            >
+              Принять и закрыть
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
