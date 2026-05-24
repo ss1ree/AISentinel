@@ -707,7 +707,9 @@ def analyze_text_endpoint(
         "id": db_result.id, 
         "label": label, 
         "score": score, 
-        "chunks_analyzed": chunks
+        "chunks_analyzed": chunks,
+        "text_content": text,  # <-- ДОБАВИЛИ передачу текста
+        "html_content": None
     }
 
 @app.post("/norm-control")

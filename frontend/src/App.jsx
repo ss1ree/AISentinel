@@ -725,9 +725,9 @@ if (initializing) {
                           dangerouslySetInnerHTML={{ __html: result.html_content }} 
                         />
                       ) : (
-                        /* Если это просто написанный вручную текст */
+                        /* Если это просто написанный вручную текст (берем из результата или из стейта ввода) */
                         <div className="text-left prose max-w-none text-slate-700 leading-relaxed font-serif print:p-0 whitespace-pre-wrap text-lg">
-                          {text}
+                          {result.text_content || text}
                         </div>
                       )}
                     </div>
