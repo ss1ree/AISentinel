@@ -72,3 +72,68 @@ body {
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
+
+@media print {
+  /* 1. Прячем все лишние интерфейсные элементы сайта */
+  aside, 
+  header, 
+  .feedback-section, 
+  button, 
+  input, 
+  label,
+  aside *,
+  header *,
+  .lg\:col-span-4, /* Вся правая колонка с графиками и результатами */
+  .bg-slate-50\/50, /* Футер редактора с кнопками */
+  footer {
+    display: none !important;
+  }
+
+  /* 2. Сбрасываем серый фон страницы и отступы */
+  body, html {
+    background-color: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 3. Растягиваем рабочую область редактора на весь лист */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .max-w-6xl {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .grid {
+    display: block !important;
+  }
+
+  .lg\:col-span-8 {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+  }
+
+  /* 4. Сам отчет раскрываем во весь экран */
+  #printable-report {
+    display: block !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  /* Заставляем браузер печатать фоновые цвета (подсветка ошибок) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
