@@ -26,6 +26,8 @@ import re
 import subprocess
 import platform
 import pandas as pd
+import httpx
+import requests
 
 IS_WINDOWS = platform.system() == "Windows"
 if IS_WINDOWS:
@@ -391,6 +393,86 @@ def run_ai_logic(text: str):
         print(f"Ошибка детектора ИИ: {e}", flush=True)
         return "Error", 0.0, 0
 
+def check_text_with_yandex_speller(text: str):
+    """
+    Проверяет текст через Яндекс.Спеллер API.
+    Находит орфографические ошибки и ошибочно разделенные слова (например, 'анали зируются').
+    Возвращает список строк-ошибок и размеченный HTML-текст с подсветкой Tailwind.
+    """
+    if not text.strip():
+        return [], text
+        
+    url = "https://speller.yandex.net/services/spellservice.json/checkText"
+    detected_errors = []
+    html_text = text
+    
+    try:
+        # Отправляем текст на проверку (lang="ru" включает русский язык)
+        response = requests.post(url, data={"text": text, "lang": "ru", "options": 0}, timeout=4)
+        if response.status_code == 200:
+            speller_errors = response.json()
+            
+            # Если ошибок нет, возвращаем текст как есть
+            if not speller_errors:
+                return [], text
+            
+            # Сортируем ошибки с конца текста к началу, чтобы при замене строк индексы букв не съезжали
+            for err in sorted(speller_errors, key=lambda x: x['pos'], reverse=True):
+                if err.get('s'):  # Если есть варианты исправления
+                    pos = err['pos']
+                    length = err['len']
+                    word = err['word']
+                    suggestion = err['s'][0]  # Берем первый, самый точный вариант исправления
+                    
+                    # Логика детекции разделенного слова (например, "анали зируются")
+                    next_text_slice = text[pos + length:].strip()
+                    remainder_needed = suggestion[len(word):]
+                    
+                    is_split_error = False
+                    actual_len = length
+                    bad_phrase = word
+                    
+                    # Если оторванная часть совпадает с началом следующего буквенного куска
+                    if remainder_needed and next_text_slice.startswith(remainder_needed):
+                        is_split_error = True
+                        second_part_idx = text.find(remainder_needed, pos + length)
+                        if second_part_idx != -1:
+                            actual_len = (second_part_idx + len(remainder_needed)) - pos
+                            bad_phrase = text[pos:pos+actual_len]
+                    
+                    # Формируем понятное описание для вывода на фронтенд
+                    if is_split_error:
+                        error_msg = f"Слово ошибочно разделено пробелом: '{bad_phrase}'. Рекомендуется слить в: '{suggestion}'"
+                    else:
+                        error_msg = f"Орфографическая ошибка в слове '{word}'. Возможно, правильно: '{suggestion}'"
+                        
+                    detected_errors.append({
+                        "message": error_msg,
+                        "word": word,
+                        "suggestion": suggestion,
+                        "position": pos
+                    })
+                    
+                    # Экранируем спецсимволы для HTML
+                    def escape_html(s):
+                        return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#39;')
+                    
+                    escaped_error = escape_html(error_msg)
+                    escaped_phrase = escape_html(bad_phrase)
+                    
+                    # Обертываем ошибочное слово в HTML-тег <span> с красивой подсветкой и подсказкой при наведении (title)
+                    span_tag = (f'<span class="spell-error bg-amber-200 text-amber-950 px-1 rounded border border-amber-400 cursor-help inline-block mx-0.5" '
+                                f'title="{escaped_error}">{escaped_phrase}</span>')
+                    
+                    html_text = html_text[:pos] + span_tag + html_text[pos+actual_len:]
+                    
+    except Exception as e:
+        print(f"[Yandex.Speller Error] Не удалось проверить текст: {e}", flush=True)
+        return [], text
+        
+    return detected_errors, html_text
+
+
 def clean_text_thoroughly(text: str) -> str:
     # 1. Заменяем переносы строк на пробелы
     text = text.replace('\n', ' ').replace('\r', ' ')
@@ -676,6 +758,43 @@ def get_stats(db: Session = Depends(get_db)):
     accuracy = (correct / total * 100) if total > 0 else 0
     return {"user_accuracy": f"{accuracy:.1f}%", "total_feedbacks": total}
 
+@app.post("/check-spelling")
+async def check_spelling(text: str, db: Session = Depends(get_db), user: database.User = Depends(get_current_user)):
+    """
+    Проверяет текст через Яндекс.Спеллер API на орфографические ошибки.
+    Возвращает список ошибок и HTML с подсветкой.
+    """
+    if not user: 
+        raise HTTPException(status_code=401, detail="Необходимо войти в систему")
+    
+    if not text or not text.strip():
+        return {
+            "status": "success",
+            "errors": [],
+            "html_content": text,
+            "error_count": 0
+        }
+    
+    try:
+        # Получаем ошибки и HTML с подсветкой от Яндекс.Спеллера
+        errors, html_content = check_text_with_yandex_speller(text)
+        
+        return {
+            "status": "success",
+            "errors": errors,
+            "html_content": html_content,
+            "error_count": len(errors)
+        }
+    except Exception as e:
+        print(f"Ошибка при проверке орфографии: {e}", flush=True)
+        return {
+            "status": "error",
+            "message": str(e),
+            "errors": [],
+            "html_content": text,
+            "error_count": 0
+        }
+
 @app.post("/analyze")
 def analyze_text_endpoint(
     text: str, 
@@ -687,6 +806,10 @@ def analyze_text_endpoint(
     
     # 1. Считаем ИИ (теперь получаем 4 значения)
     label, score, chunks = run_ai_logic(text)
+    
+    # 1.5. Проверяем орфографию и подсвечиваем ошибки разрыва слов
+    spelling_errors, html_content = check_text_with_yandex_speller(text)
+    
     # 2. Сохраняем в базу данных (filename у нас тут None, так как это просто текст)
     db_result = database.DetectionResult(
         text_content=text,
@@ -708,8 +831,9 @@ def analyze_text_endpoint(
         "label": label, 
         "score": score, 
         "chunks_analyzed": chunks,
-        "text_content": text,  # <-- ДОБАВИЛИ передачу текста
-        "html_content": None
+        "text_content": text,
+        "html_content": html_content,
+        "spelling_errors": spelling_errors
     }
 
 @app.post("/norm-control")
@@ -1010,25 +1134,24 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     all_speller_results = {}
     if settings.norm_enabled and settings.check_apak and paragraphs_to_check:
         try:
-            import requests
-            # Формируем гарантированно правильный формат данных для POST-запроса
-            payload_data = [('text', p) for p in paragraphs_to_check]
-            payload_data.append(('lang', 'ru'))
-            
-            # Отправляем весь массив абзацев в ОДНОМ запросе (метод checkTexts)
-            response = requests.post(
-                "https://speller.yandex.net/services/spellservice.json/checkTexts",
-                data=payload_data,
-                timeout=5.0
-            )
-            if response.status_code == 200:
-                results_list = response.json()
-                # Сопоставляем результаты проверки с индексами абзацев в документе
-                for i, p_idx in enumerate(p_indices):
-                    if i < len(results_list):
-                        all_speller_results[p_idx] = results_list[i]
+            # Проверяем каждый абзац через check_text_with_yandex_speller
+            for i, p_text in enumerate(paragraphs_to_check):
+                p_idx = p_indices[i]
+                errors, _ = check_text_with_yandex_speller(p_text)
+                
+                # Преобразуем errors в формат, ожидаемый нижней частью кода
+                if errors:
+                    api_format_errors = []
+                    for err in errors:
+                        api_format_errors.append({
+                            "word": err.get("word", ""),
+                            "s": [err.get("suggestion", "")],
+                            "pos": err.get("position", 0),
+                            "len": len(err.get("word", ""))
+                        })
+                    all_speller_results[p_idx] = api_format_errors
         except Exception as e:
-            print(f"Ошибка пакетного спеллера: {e}", flush=True)
+            print(f"Ошибка спеллера: {e}", flush=True)
 
     # --- 2. ОСНОВНОЙ ЦИКЛ ОБРАБОТКИ ДОКУМЕНТА ---
     for idx, p in enumerate(doc.paragraphs):

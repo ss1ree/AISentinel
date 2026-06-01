@@ -19,6 +19,24 @@ body {
   overflow-x: hidden;
 }
 
+.spell-error {
+  background-color: #fde68a !important; /* Нежно-желтый маркер (bg-amber-200) */
+  color: #451a03 !important;            /* Темно-коричневый текст для читаемости */
+  padding-left: 4px !important;
+  padding-right: 4px !important;
+  border-radius: 6px !important;
+  border: 1px dashed #f59e0b !important; /* Пунктирная оранжевая рамка */
+  cursor: help !important;              /* Курсор в виде знака вопроса при наведении */
+  display: inline-block !important;
+  margin: 0 2px !important;
+  transition: all 0.2s ease;
+}
+
+.spell-error:hover {
+  background-color: #fcd34d !important; /* Чуть темнее при наведении */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
 /* Красивый скроллбар для современных браузеров */
 ::-webkit-scrollbar {
   width: 8px;
