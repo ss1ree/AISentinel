@@ -396,78 +396,93 @@ def run_ai_logic(text: str):
 def check_text_with_yandex_speller(text: str):
     """
     Проверяет текст через Яндекс.Спеллер API.
-    Находит орфографические ошибки и ошибочно разделенные слова (например, 'анали зируются').
-    Возвращает список строк-ошибок и размеченный HTML-текст с подсветкой Tailwind.
+    Находит орфографические ошибки и ошибочно разделенные слова (например, 'анали зируються').
+    Возвращает список строк-ошибок и размеченный HTML-текст с подсветкой.
     """
     if not text.strip():
         return [], text
         
     url = "https://speller.yandex.net/services/spellservice.json/checkText"
     detected_errors = []
-    html_text = text
     
     try:
-        # Отправляем текст на проверку (lang="ru" включает русский язык)
+        # Отправляем текст на проверку
         response = requests.post(url, data={"text": text, "lang": "ru", "options": 0}, timeout=4)
-        if response.status_code == 200:
-            speller_errors = response.json()
+        if response.status_code != 200:
+            print(f"[Yandex.Speller] Status code: {response.status_code}", flush=True)
+            return [], text
             
-            # Если ошибок нет, возвращаем текст как есть
-            if not speller_errors:
-                return [], text
+        speller_errors = response.json()
+        
+        # Если ошибок нет, возвращаем текст как есть
+        if not speller_errors:
+            return [], text
+        
+        print(f"[Yandex.Speller] Found {len(speller_errors)} errors", flush=True)
+        
+        # Экранирование HTML
+        def escape_html(s):
+            return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#39;')
+        
+        # Сортируем ошибки с конца текста к началу для правильной замены индексов
+        sorted_errors = sorted(speller_errors, key=lambda x: x['pos'], reverse=True)
+        html_text = text
+        
+        for err in sorted_errors:
+            if not err.get('s'):  # Если нет вариантов исправления
+                continue
+                
+            pos = err['pos']
+            length = err['len']
+            word = err['word']
+            suggestion = err['s'][0]
             
-            # Сортируем ошибки с конца текста к началу, чтобы при замене строк индексы букв не съезжали
-            for err in sorted(speller_errors, key=lambda x: x['pos'], reverse=True):
-                if err.get('s'):  # Если есть варианты исправления
-                    pos = err['pos']
-                    length = err['len']
-                    word = err['word']
-                    suggestion = err['s'][0]  # Берем первый, самый точный вариант исправления
-                    
-                    # Логика детекции разделенного слова (например, "анали зируются")
-                    next_text_slice = text[pos + length:].strip()
-                    remainder_needed = suggestion[len(word):]
-                    
-                    is_split_error = False
-                    actual_len = length
-                    bad_phrase = word
-                    
-                    # Если оторванная часть совпадает с началом следующего буквенного куска
-                    if remainder_needed and next_text_slice.startswith(remainder_needed):
-                        is_split_error = True
-                        second_part_idx = text.find(remainder_needed, pos + length)
-                        if second_part_idx != -1:
-                            actual_len = (second_part_idx + len(remainder_needed)) - pos
-                            bad_phrase = text[pos:pos+actual_len]
-                    
-                    # Формируем понятное описание для вывода на фронтенд
-                    if is_split_error:
-                        error_msg = f"Слово ошибочно разделено пробелом: '{bad_phrase}'. Рекомендуется слить в: '{suggestion}'"
-                    else:
-                        error_msg = f"Орфографическая ошибка в слове '{word}'. Возможно, правильно: '{suggestion}'"
-                        
-                    detected_errors.append({
-                        "message": error_msg,
-                        "word": word,
-                        "suggestion": suggestion,
-                        "position": pos
-                    })
-                    
-                    # Экранируем спецсимволы для HTML
-                    def escape_html(s):
-                        return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#39;')
-                    
-                    escaped_error = escape_html(error_msg)
-                    escaped_phrase = escape_html(bad_phrase)
-                    
-                    # Обертываем ошибочное слово в HTML-тег <span> с красивой подсветкой и подсказкой при наведении (title)
-                    span_tag = (f'<span class="spell-error bg-amber-200 text-amber-950 px-1 rounded border border-amber-400 cursor-help inline-block mx-0.5" '
-                                f'title="{escaped_error}">{escaped_phrase}</span>')
-                    
-                    html_text = html_text[:pos] + span_tag + html_text[pos+actual_len:]
+            # Проверяем, является ли это ошибкой разрыва слова
+            is_split_error = False
+            actual_len = length
+            bad_phrase = text[pos:pos+length]
+            
+            # Ищем, совпадает ли продолжение слова со следующим словом
+            remainder = suggestion[len(word):]
+            if remainder:
+                next_word_start = pos + length
+                # Пропускаем пробелы
+                while next_word_start < len(text) and text[next_word_start] == ' ':
+                    next_word_start += 1
+                
+                if next_word_start < len(text) and text[next_word_start:].startswith(remainder):
+                    is_split_error = True
+                    actual_len = next_word_start + len(remainder) - pos
+                    bad_phrase = text[pos:pos+actual_len]
+            
+            # Формируем описание ошибки
+            if is_split_error:
+                error_msg = f"Слово разделено пробелом: '{bad_phrase.strip()}' → '{suggestion}'"
+            else:
+                error_msg = f"Ошибка: '{word}' → '{suggestion}'"
+            
+            detected_errors.append({
+                "message": error_msg,
+                "word": word,
+                "suggestion": suggestion,
+                "position": pos,
+                "is_split": is_split_error
+            })
+            
+            # Создаем HTML с подсветкой (встроенные стили вместо Tailwind)
+            escaped_error = escape_html(error_msg)
+            escaped_phrase = escape_html(bad_phrase)
+            
+            span_tag = (f'<span style="background-color: #fde68a; color: #451a03; padding: 2px 4px; border-radius: 4px; '
+                       f'border: 1px dashed #f59e0b; cursor: help; display: inline; margin: 0 2px;" '
+                       f'title="{escaped_error}">{escaped_phrase}</span>')
+            
+            # Заменяем в html_text, работая с текущей версией
+            html_text = html_text[:pos] + span_tag + html_text[pos+actual_len:]
+            print(f"[Yandex.Speller] Marked error at {pos}: {bad_phrase}", flush=True)
                     
     except Exception as e:
-        print(f"[Yandex.Speller Error] Не удалось проверить текст: {e}", flush=True)
+        print(f"[Yandex.Speller Error] {e}", flush=True)
         return [], text
         
     return detected_errors, html_text

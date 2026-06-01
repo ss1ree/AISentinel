@@ -740,14 +740,27 @@ if (initializing) {
                         <p className="text-slate-500 mt-2 font-bold text-sm">Проверено: {user?.email} | Документ: {result.filename || 'Введенный текст'}</p>
                       </div>
                       
-                      {/* Если это файл и есть HTML-разметка */}
+                      {/* Если есть HTML-разметка с подсвеченными ошибками */}
                       {result.html_content ? (
-                        <div 
-                          className="text-left prose max-w-none text-slate-700 leading-relaxed font-serif print:p-0"
-                          dangerouslySetInnerHTML={{ __html: result.html_content }} 
-                        />
+                        <>
+                          <div 
+                            className="text-left text-slate-700 leading-relaxed font-serif print:p-0 whitespace-pre-wrap text-lg"
+                            dangerouslySetInnerHTML={{ __html: result.html_content }} 
+                          />
+                          {/* Список найденных ошибок */}
+                          {result.spelling_errors && result.spelling_errors.length > 0 && (
+                            <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                              <h3 className="font-bold text-amber-900 mb-2">🔍 Найдено ошибок: {result.spelling_errors.length}</h3>
+                              <ul className="text-sm text-amber-800 space-y-1">
+                                {result.spelling_errors.map((err, idx) => (
+                                  <li key={idx}>{err.is_split ? '⚠️ Разрыв: ' : '• '}{err.message}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
                       ) : (
-                        /* Если это просто написанный вручную текст (берем из результата или из стейта ввода) */
+                        /* Fallback на текст без подсвечивания */
                         <div className="text-left prose max-w-none text-slate-700 leading-relaxed font-serif print:p-0 whitespace-pre-wrap text-lg">
                           {result.text_content || text}
                         </div>
