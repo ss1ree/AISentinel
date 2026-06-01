@@ -5,16 +5,27 @@ import datetime
 import os
 
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+if not SQLALCHEMY_DATABASE_URL:
+    # Безопасный fallback для локальной разработки — sqlite файл рядом с модулем
+    base_dir = os.path.dirname(__file__)
+    SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.path.join(base_dir, 'app.db')}"
 # Строка подключения к PostgreSQL в Docker
 # SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost:5432/ai_detector"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    pool_size=30,           # Базовое количество подключений (хватит на всех)
-    max_overflow=50,        # Сколько можно создать сверх базы при нагрузке
-    pool_timeout=30,        # Время ожидания
-    pool_pre_ping=True      # ВАЖНО: автоматически переподключаться при обрыве связи с Railway БД
-)
+# При использовании SQLite некоторые параметры пула не применимы
+if SQLALCHEMY_DATABASE_URL.startswith('sqlite:'):
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_size=30,
+        max_overflow=50,
+        pool_timeout=30,
+        pool_pre_ping=True
+    )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

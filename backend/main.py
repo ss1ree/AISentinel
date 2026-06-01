@@ -1142,8 +1142,9 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
             lower_text = stripped_text.lower()
             if not (lower_text.startswith("удк") or lower_text.startswith("udc") or "©" in lower_text or "(c)" in lower_text or lower_text.startswith("таблица")):
-                # Приводим к нижнему регистру перед отправкой, чтобы обойти игнорирование слов в ВЕРХНЕМ РЕГИСТРЕ!
-                paragraphs_to_check.append(stripped_text.lower())
+                # Сохраняем оригинальный текст абзаца (не приводим к lower()),
+                # чтобы корректно вставить подсветку с учетом регистра и пунктуации
+                paragraphs_to_check.append(stripped_text)
                 p_indices.append(idx)
 
     all_speller_results = {}
@@ -1152,11 +1153,11 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             # Проверяем каждый абзац через check_text_with_yandex_speller
             for i, p_text in enumerate(paragraphs_to_check):
                 p_idx = p_indices[i]
-                errors, _ = check_text_with_yandex_speller(p_text)
-                
-                # Преобразуем errors в формат, ожидаемый нижней частью кода
+                errors, html_p = check_text_with_yandex_speller(p_text)
+
+                # Сохраняем и ошибки, и HTML-версию абзаца (если есть)
+                api_format_errors = []
                 if errors:
-                    api_format_errors = []
                     for err in errors:
                         api_format_errors.append({
                             "word": err.get("word", ""),
@@ -1164,7 +1165,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                             "pos": err.get("position", 0),
                             "len": len(err.get("word", ""))
                         })
-                    all_speller_results[p_idx] = api_format_errors
+                all_speller_results[p_idx] = {"errors": api_format_errors, "html": html_p}
         except Exception as e:
             print(f"Ошибка спеллера: {e}", flush=True)
 
@@ -1184,9 +1185,13 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         lower_text = stripped_text.lower()
         
         # --- ИЗВЛЕКАЕМ ОШИБКИ ИЗ НАШЕГО ПАКЕТНОГО ОТВЕТА (БЕЗ СЕТЕВЫХ ЗАПРОСОВ) ---
-        paragraph_errors = all_speller_results.get(idx, [])
+        paragraph_info = all_speller_results.get(idx, {})
+        paragraph_errors = paragraph_info.get("errors", [])
+        paragraph_html = paragraph_info.get("html")
         split_words_to_highlight = []
-        
+
+        # (если есть готовый HTML от спеллера, он будет использован ниже после вычисления стилей)
+
         if paragraph_errors:
             try:
                 import difflib # Используем встроенную библиотеку для нечеткого сравнения текстов
@@ -1285,8 +1290,13 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if is_spacing_error: p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
 
         p_html = f'<p style="{p_style}">'
+        # Если спеллер вернул размеченный HTML для этого абзаца — вставляем его напрямую
+        if paragraph_html:
+            html_lines.append(f'<p style="{p_style}">{paragraph_html}</p>')
+            prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
+            continue
+
         marker_added = False 
-        
         for run in p.runs:
             if not run.text: continue
             t = run.text.replace("<", "&lt;").replace(">", "&gt;")
@@ -1461,6 +1471,17 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
     db.refresh(db_result)
     
     # 9. Отдаем фронтенду
+    # Логируем для отладки: содержит ли html_content подсветку разрывов слов
+    try:
+        has_mark = False
+        if html_content:
+            has_mark = ('Разрыв слова' in html_content) or ("background-color: #ffedd5" in html_content) or ("background-color: #fde68a" in html_content) or ("<mark" in html_content) or ("<span" in html_content) or ("spell-error" in html_content)
+        snippet = (html_content[:500].replace('\n',' ') + '...') if html_content and len(html_content) > 500 else (html_content or '')
+        print(f"[DEBUG] analyze-file: html length={len(html_content) if html_content else 0}, has_mark={has_mark}, errors_count={len(format_errors)}", flush=True)
+        print(f"[DEBUG] analyze-file: snippet={snippet}", flush=True)
+    except Exception:
+        print(f"[DEBUG] analyze-file: unable to inspect html_content", flush=True)
+
     return {
         "id": db_result.id, 
         "label": label, 
