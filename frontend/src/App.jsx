@@ -56,7 +56,7 @@ function App() {
     localStorage.getItem('hideCookieWarning') !== 'true'
   );
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
 
   // 1. Проверка текущей сессии при загрузке
   useEffect(() => {
@@ -958,8 +958,8 @@ if (initializing) {
                 {/* 2. КАРТОЧКА НОРМОКОНТРОЛЯ (APAC Standards) */}
                 {settings.norm_enabled && (
                   <div className={`bg-white rounded-[32px] shadow-sm border border-slate-200 p-8 animate-in slide-in-from-bottom-4 duration-500 transition-all ${
-                    result && result.filename?.toLowerCase().endsWith('.docx') 
-                      ? (result.format_errors?.length > 0 ? 'border-l-8 border-l-amber-500' : 'border-l-8 border-l-green-500') 
+                    result && result.norm_ok !== undefined
+                      ? (result.norm_ok ? 'border-l-8 border-l-green-500' : 'border-l-8 border-l-amber-500')
                       : ''
                   }`}>
                     <h4 className="text-slate-900 font-black text-xs uppercase tracking-[2px] mb-6 flex items-center gap-2">
@@ -995,12 +995,18 @@ if (initializing) {
                           );
                         })}
                       </div>
-                    ) : (
+                    ) : result.norm_ok ? (
                       // 3. СОСТОЯНИЕ: Файл docx загружен и ошибок нет
                       <div className="bg-green-50 p-5 rounded-[20px] text-green-700 text-center shadow-inner">
                         <CheckCircle2 size={24} className="mx-auto mb-2 opacity-50" />
                         <p className="text-[10px] font-black uppercase tracking-wider text-green-600">Оформление соответствует</p>
                         <p className="text-[9px] font-medium mt-1 opacity-70 italic text-green-800">Проверка АПАК пройдена успешно</p>
+                      </div>
+                    ) : (
+                      <div className="bg-amber-50 p-5 rounded-[20px] text-amber-700 text-center shadow-inner">
+                        <AlertTriangle size={24} className="mx-auto mb-2 opacity-50" />
+                        <p className="text-[10px] font-black uppercase tracking-wider text-amber-600">Найдены несоответствия</p>
+                        <p className="text-[9px] font-medium mt-1 opacity-70 italic text-amber-800">Требуется внимательная проверка</p>
                       </div>
                     )}
                   </div>

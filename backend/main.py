@@ -436,12 +436,22 @@ def check_text_with_yandex_speller(text: str):
             length = err['len']
             word = err['word']
             suggestion = err['s'][0]
-            
+
+            # Фильтрация ложных срабатываний: инициалы, email, URL, цифры, чисто латинские слова
+            # Пропускаем одиночные буквы и слова, содержащие цифры или специальные символы
+            if len(word.strip()) <= 1:
+                continue
+            if re.search(r'[@:\/\\\d]', word):
+                continue
+            # Пропускаем слова, содержащие только латинские буквы (часто инициалы или англ. адреса)
+            if re.fullmatch(r'[A-Za-z]+', word):
+                continue
+
             # Проверяем, является ли это ошибкой разрыва слова
             is_split_error = False
             actual_len = length
             bad_phrase = text[pos:pos+length]
-            
+
             # Ищем, совпадает ли продолжение слова со следующим словом
             remainder = suggestion[len(word):]
             if remainder:
@@ -449,7 +459,7 @@ def check_text_with_yandex_speller(text: str):
                 # Пропускаем пробелы
                 while next_word_start < len(text) and text[next_word_start] == ' ':
                     next_word_start += 1
-                
+
                 if next_word_start < len(text) and text[next_word_start:].startswith(remainder):
                     is_split_error = True
                     actual_len = next_word_start + len(remainder) - pos
@@ -469,13 +479,11 @@ def check_text_with_yandex_speller(text: str):
                 "is_split": is_split_error
             })
             
-            # Создаем HTML с подсветкой (встроенные стили вместо Tailwind)
+            # Создаем HTML с подсветкой (используем класс spell-error вместо встроенных стилей)
             escaped_error = escape_html(error_msg)
             escaped_phrase = escape_html(bad_phrase)
             
-            span_tag = (f'<span style="background-color: #fde68a; color: #451a03; padding: 2px 4px; border-radius: 4px; '
-                       f'border: 1px dashed #f59e0b; cursor: help; display: inline; margin: 0 2px;" '
-                       f'title="{escaped_error}">{escaped_phrase}</span>')
+            span_tag = (f'<span class="spell-error" title="{escaped_error}">{escaped_phrase}</span>')
             
             # Заменяем в html_text, работая с текущей версией
             html_text = html_text[:pos] + span_tag + html_text[pos+actual_len:]
@@ -1124,6 +1132,11 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     errors = []
     html_lines = []
     
+    # Добавляем ошибки проверки формата (поля, шрифты, библиография)
+    if settings.norm_enabled and settings.check_apak:
+        format_check_errors = check_formatting(file_bytes, settings)
+        errors.extend(format_check_errors)
+    
     current_block = "header" 
     empty_lines = 0
     valid_single_letters = ['а', 'и', 'в', 'о', 'у', 'с', 'к', 'я', 'б', 'ж', 'z', 'a', 'i']
@@ -1153,18 +1166,22 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             # Проверяем каждый абзац через check_text_with_yandex_speller
             for i, p_text in enumerate(paragraphs_to_check):
                 p_idx = p_indices[i]
-                errors, html_p = check_text_with_yandex_speller(p_text)
+                speller_errors, html_p = check_text_with_yandex_speller(p_text)
 
                 # Сохраняем и ошибки, и HTML-версию абзаца (если есть)
                 api_format_errors = []
-                if errors:
-                    for err in errors:
+                if speller_errors:
+                    for err in speller_errors:
                         api_format_errors.append({
                             "word": err.get("word", ""),
                             "s": [err.get("suggestion", "")],
                             "pos": err.get("position", 0),
                             "len": len(err.get("word", ""))
                         })
+                        # Добавляем орфографические ошибки в общий список (через сообщение из спеллера)
+                        msg = f"[Орфография] {err.get('message', '')}"
+                        if msg not in errors and err.get('message'):
+                            errors.append(msg)
                 all_speller_results[p_idx] = {"errors": api_format_errors, "html": html_p}
         except Exception as e:
             print(f"Ошибка спеллера: {e}", flush=True)
@@ -1340,32 +1357,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            # Проверка шрифта
-            if settings.norm_enabled and current_block != "figure":
-                try:
-                    expected_font = str(settings.font_name or "Times New Roman").strip().lower()
-                    actual_f_name = f_name if f_name else "Шрифт темы (Aptos / Calibri)"
-                    found_font = str(actual_f_name).strip().lower()
-                    
-                    name_error = found_font != expected_font
-                    size_error = f_size and abs(round(float(f_size)) - expected_size) > 0.1
-                    
-                    if size_error or name_error:
-                        err_msgs = []
-                        if name_error:
-                            disp_name = settings.font_name or "Times New Roman"
-                            errors.append(f"[Гарнитура] Обнаружен {actual_f_name} (нужен {disp_name})")
-                            err_msgs.append(f"Шрифт: {actual_f_name}")
-                        if size_error:
-                            errors.append(f"[Размер] Ожидался {expected_size}pt, найден {round(f_size)}pt")
-                            err_msgs.append(f"Размер: {round(f_size)}pt")
-                            
-                        title_attr = " | ".join(err_msgs)
-                        t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='{title_attr}'>{t}</mark>"
-                except Exception as e:
-                    print(f"Ошибка парсинга шрифта: {e}", flush=True)
-
-            # Проверка пробелов и разрывов слов (БЕЗ СЕТЕВЫХ ЗАПРОСОВ)
+            # Визуальная подсветка пробелов и разрывов слов (БЕЗ ДОПОЛНИТЕЛЬНЫХ ПРОВЕРОК)
             if settings.norm_enabled and settings.check_apak:
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
@@ -1489,7 +1481,8 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
         "format_errors": format_errors, 
         "html_content": html_content, 
         "page_count": page_count, 
-        "filename": filename
+        "filename": filename,
+        "norm_ok": False if format_errors else True
     }
 
 @app.get("/history")
