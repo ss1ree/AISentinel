@@ -2,8 +2,6 @@
 FROM python:3.11-slim
 
 # 1. Устанавливаем системные зависимости
-# libreoffice — замена MS Word для Linux
-# libmagic1 — для определения типов файлов
 RUN apt-get update && apt-get install -y \
     libreoffice \
     libmagic1 \
@@ -12,24 +10,32 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Устанавливаем рабочую директорию
-WORKDIR /app
+# 2. Создаем пользователя для Hugging Face (UID 1000)
+# Это защитит от ошибок "Permission Denied" при работе Transformers/Torch
+RUN useradd -m -u 1000 user
+ENV HOME=/home/user
+ENV PATH=/home/user/.local/bin:$PATH
+WORKDIR $HOME/app
 
 # 3. Устанавливаем зависимости Python
 COPY requirements.txt .
 
-# ВАЖНО: Сначала устанавливаем версию Torch для CPU (она весит 150МБ вместо 2ГБ)
-# Это критически важно, чтобы уложиться в лимиты памяти Railway
+# Сначала устанавливаем версию Torch для CPU (критично для экономии памяти на HF Spaces)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Копируем остальной код бэкенда
-COPY . .
+# Сразу создаем папки под кэш моделей в доступном для пользователя месте
+RUN mkdir -p /tmp/huggingface_cache /tmp/sentence_transformers_cache && chmod -R 777 /tmp
 
-# 5. Указываем порт (Railway сам прокинет нужный порт через переменную среды)
-ENV PORT=8080
-EXPOSE 8080
+# 4. Копируем остальной код бэкенда и передаем права пользователю user
+COPY --chown=user:user . .
 
-# 6. Запуск через uvicorn
-# Используем заголовок --forwarded-allow-ips для работы через прокси Railway
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# Переключаемся на безопасного пользователя
+USER user
+
+# 5. Указываем порт для Hugging Face (ОБЯЗАТЕЛЬНО 7860)
+ENV PORT=7860
+EXPOSE 7860
+
+# 6. Запуск через uvicorn на порту 7860
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 7860"]
