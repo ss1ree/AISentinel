@@ -1132,7 +1132,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     errors = []
     html_lines = []
     
-    # Добавляем ошибки проверки формата (поля, шрифты, библиография)
+    # Добавляем общие ошибки проверки формата (поля, шрифты, библиография)
     if settings.norm_enabled and settings.check_apak:
         format_check_errors = check_formatting(file_bytes, settings)
         errors.extend(format_check_errors)
@@ -1155,8 +1155,6 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if len(stripped_text) > 5 and re.search(r'[а-яА-ЯёЁa-zA-Z]', stripped_text):
             lower_text = stripped_text.lower()
             if not (lower_text.startswith("удк") or lower_text.startswith("udc") or "©" in lower_text or "(c)" in lower_text or lower_text.startswith("таблица")):
-                # Сохраняем оригинальный текст абзаца (не приводим к lower()),
-                # чтобы корректно вставить подсветку с учетом регистра и пунктуации
                 paragraphs_to_check.append(stripped_text)
                 p_indices.append(idx)
 
@@ -1166,9 +1164,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             # Проверяем каждый абзац через check_text_with_yandex_speller
             for i, p_text in enumerate(paragraphs_to_check):
                 p_idx = p_indices[i]
-                speller_errors, html_p = check_text_with_yandex_speller(p_text)
+                speller_errors, _ = check_text_with_yandex_speller(p_text)
 
-                # Сохраняем и ошибки, и HTML-версию абзаца (если есть)
                 api_format_errors = []
                 if speller_errors:
                     for err in speller_errors:
@@ -1176,13 +1173,15 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                             "word": err.get("word", ""),
                             "s": [err.get("suggestion", "")],
                             "pos": err.get("position", 0),
-                            "len": len(err.get("word", ""))
+                            "len": len(err.get("word", "")),
+                            "is_split": err.get("is_split", False),
+                            "message": err.get("message", "")
                         })
-                        # Добавляем орфографические ошибки в общий список (через сообщение из спеллера)
+                        # Добавляем орфографические ошибки в общий список
                         msg = f"[Орфография] {err.get('message', '')}"
                         if msg not in errors and err.get('message'):
                             errors.append(msg)
-                all_speller_results[p_idx] = {"errors": api_format_errors, "html": html_p}
+                all_speller_results[p_idx] = api_format_errors
         except Exception as e:
             print(f"Ошибка спеллера: {e}", flush=True)
 
@@ -1202,12 +1201,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         lower_text = stripped_text.lower()
         
         # --- ИЗВЛЕКАЕМ ОШИБКИ ИЗ НАШЕГО ПАКЕТНОГО ОТВЕТА (БЕЗ СЕТЕВЫХ ЗАПРОСОВ) ---
-        paragraph_info = all_speller_results.get(idx, {})
-        paragraph_errors = paragraph_info.get("errors", [])
-        paragraph_html = paragraph_info.get("html")
-        split_words_to_highlight = []
-
-        # (если есть готовый HTML от спеллера, он будет использован ниже после вычисления стилей)
+        paragraph_errors = all_speller_results.get(idx, [])
+        words_to_highlight = [] # Список слов для точечной подсветки (опечатки и разрывы)
 
         if paragraph_errors:
             try:
@@ -1216,46 +1211,59 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                 for err in paragraph_errors:
                     word = err.get("word")
                     suggestions = err.get("s") or []
+                    is_split = err.get("is_split", False)
+                    message = err.get("message", "")
                     
                     try:
                         idx_w = words_in_p.index(word)
                     except ValueError:
                         continue
                         
-                    is_split = False
+                    is_split_error = is_split
                     split_combo = ""
-                    word_to_highlight = ""
+                    word_to_highlight = word
                     
                     # 1. Склейка со следующим словом
                     if idx_w < len(words_in_p) - 1:
                         next_w = words_in_p[idx_w + 1]
                         combo = (word + next_w).lower()
                         for s in suggestions:
-                            # Если схожесть склейки и словарного слова >= 85% (ловит "руководитель" и "руководитель")
                             sim = difflib.SequenceMatcher(None, s.lower(), combo).ratio()
                             if sim >= 0.85:
-                                is_split = True
+                                is_split_error = True
                                 split_combo = f"{words_in_p[idx_w]} {next_w}"
                                 word_to_highlight = words_in_p[idx_w]
                                 break
                             
                     # 2. Склейка с предыдущим словом
-                    if not is_split and idx_w > 0:
+                    if not is_split_error and idx_w > 0:
                         prev_w = words_in_p[idx_w - 1]
                         combo = (prev_w + word).lower()
                         for s in suggestions:
                             sim = difflib.SequenceMatcher(None, s.lower(), combo).ratio()
                             if sim >= 0.85:
-                                is_split = True
+                                is_split_error = True
                                 split_combo = f"{prev_w} {words_in_p[idx_w]}"
                                 word_to_highlight = words_in_p[idx_w]
                                 break
                             
-                    if is_split:
-                        err_msg = f"[Типографика] Разрыв слова: '{split_combo}'"
+                    if is_split_error:
+                        combo_desc = split_combo if split_combo else f"{word_to_highlight}..."
+                        words_to_highlight.append({
+                            "word": word_to_highlight,
+                            "title": f"Разрыв слова: {combo_desc}",
+                            "style": "background-color: #ffedd5; color: #c2410c; outline: 1px solid #ea580c; outline-offset: -1px; padding: 0 2px; border-radius: 4px;"
+                        })
+                        err_msg = f"[Типографика] Разрыв слова: '{combo_desc}'"
                         if err_msg not in errors:
                             errors.append(err_msg)
-                        split_words_to_highlight.append((word_to_highlight, split_combo))
+                    else:
+                        # Обычная опечатка
+                        words_to_highlight.append({
+                            "word": word,
+                            "title": message,
+                            "style": "background-color: #fef08a; color: #854d0e; outline: 1px dashed #ca8a04; outline-offset: -1px; padding: 0 2px; border-radius: 4px;"
+                        })
             except Exception as e:
                 print(f"Ошибка маппинга разрывов: {e}", flush=True)
 
@@ -1307,12 +1315,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if is_spacing_error: p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
 
         p_html = f'<p style="{p_style}">'
-        # Если спеллер вернул размеченный HTML для этого абзаца — вставляем его напрямую
-        if paragraph_html:
-            html_lines.append(f'<p style="{p_style}">{paragraph_html}</p>')
-            prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
-            continue
 
+        # ТЕПЕРЬ МЫ НИКОГДА НЕ ПРОПУСКАЕМ p.runs И ВСЕГДА ВЫПОЛНЯЕМ ПРОВЕРКУ ШРИФТОВ!
         marker_added = False 
         for run in p.runs:
             if not run.text: continue
@@ -1357,19 +1361,48 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if f_size is not None and round(f_size) == 11 and not has_explicit_size:
                 f_size = expected_size
 
-            # Визуальная подсветка пробелов и разрывов слов (БЕЗ ДОПОЛНИТЕЛЬНЫХ ПРОВЕРОК)
+            # Проверка шрифта
+            if settings.norm_enabled and current_block != "figure":
+                try:
+                    expected_font = str(settings.font_name or "Times New Roman").strip().lower()
+                    actual_f_name = f_name if f_name else "Шрифт темы (Aptos / Calibri)"
+                    found_font = str(actual_f_name).strip().lower()
+                    
+                    name_error = found_font != expected_font
+                    size_error = f_size and abs(round(float(f_size)) - expected_size) > 0.1
+                    
+                    if size_error or name_error:
+                        err_msgs = []
+                        if name_error:
+                            disp_name = settings.font_name or "Times New Roman"
+                            errors.append(f"[Гарнитура] Обнаружен {actual_f_name} (нужен {disp_name})")
+                            err_msgs.append(f"Шрифт: {actual_f_name}")
+                        if size_error:
+                            errors.append(f"[Размер] Ожидался {expected_size}pt, найден {round(f_size)}pt")
+                            err_msgs.append(f"Размер: {round(f_size)}pt")
+                            
+                        title_attr = " | ".join(err_msgs)
+                        t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='{title_attr}'>{t}</mark>"
+                except Exception as e:
+                    print(f"Ошибка парсинга шрифта: {e}", flush=True)
+
+            # Проверка пробелов и разрывов слов (БЕЗ ДОПОЛНИТЕЛЬНЫХ СЕТЕВЫХ ЗАПРОСОВ)
             if settings.norm_enabled and settings.check_apak:
                 if "  " in t:
                     errors.append(f"[Пробелы] Лишние пробелы")
                     t = t.replace("  ", "<span style='background-color: #fef08a; box-shadow: 0 2px 0 #ca8a04;' title='Лишние пробелы'>  </span>")
 
-                # Подсвечиваем разрывы слов
-                for bad_word, combo_desc in split_words_to_highlight:
+                # Подсвечиваем разрывы слов и опечатки
+                for item in words_to_highlight:
+                    bad_word = item["word"]
+                    title_text = item["title"]
+                    style_str = item["style"]
+                    
                     pattern = rf'\b{bad_word}\b'
                     if re.search(pattern, t):
                         t = re.sub(
                             pattern, 
-                            f"<mark style='background-color: #ffedd5; outline: 1px solid #ea580c;' title='Разрыв слова: {combo_desc}'>{bad_word}</mark>", 
+                            f"<mark style='{style_str}' title='{title_text}'>{bad_word}</mark>", 
                             t
                         )
 

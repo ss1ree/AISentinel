@@ -255,7 +255,19 @@ function App() {
     // 2. Собираем блок с ошибками нормоконтроля (если они есть)
     let formatInfo = '';
     if (result.format_errors && result.format_errors.length > 0) {
-      const errs = result.format_errors.map(e => `<li style="margin-bottom: 5px;">${e}</li>`).join('');
+      const errs = result.format_errors.map(error => {
+        const isApak = error.startsWith('[АПАК]');
+
+        return `
+          <li style="
+            margin-bottom: 5px;
+            color: ${isApak ? '#dc2626' : '#7f1d1d'};
+            font-weight: ${isApak ? '700' : '400'};
+          ">
+            ${error}
+          </li>
+        `;
+      }).join('');
       formatInfo = `
         <div style="background-color: #fef2f2; border-left: 6px solid #ef4444; padding: 15px; margin-bottom: 20px;">
           <h3 style="margin: 0 0 10px 0; color: #991b1b; font-family: sans-serif; font-size: 16px;">Найдены ошибки нормоконтроля:</h3>
