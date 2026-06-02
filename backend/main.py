@@ -603,8 +603,8 @@ def check_text_with_yandex_speller(text: str):
             remainder = suggestion[len(word):]
             if remainder:
                 next_word_start = pos + length
-                # Пропускаем пробелы
-                while next_word_start < len(text) and text[next_word_start] == ' ':
+                # Пропускаем как обычные пробелы, так и неразрывные (\xa0)
+                while next_word_start < len(text) and text[next_word_start] in [' ', '\xa0']:
                     next_word_start += 1
 
                 if next_word_start < len(text) and text[next_word_start:].startswith(remainder):
@@ -1525,14 +1525,17 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                     is_split = err.get("is_split", False)
                     message = err.get("message", "")
                     
+                    # Если в word пришла склеенная фраза с пробелом (например, "оптич еское")
+                    first_word = word.split()[0] if word else ""
                     try:
-                        idx_w = words_in_p.index(word)
+                        idx_w = words_in_p.index(first_word)
                     except ValueError:
                         continue
                         
-                    is_split_error = is_split
-                    split_combo = ""
-                    word_to_highlight = word
+                    # Если слово содержит пробел внутри, это гарантированно разрыв слова
+                    is_split_error = is_split or (len(word.split()) > 1)
+                    split_combo = word if len(word.split()) > 1 else ""
+                    word_to_highlight = first_word
                     
                     # 1. Склейка со следующим словом
                     if idx_w < len(words_in_p) - 1:
@@ -1562,6 +1565,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                         combo_desc = split_combo if split_combo else f"{word_to_highlight}..."
                         words_to_highlight.append({
                             "word": word_to_highlight,
+                            "phrase": split_combo, # Сохраняем всю связку для точной подсветки
                             "title": f"Разрыв слова: {combo_desc}",
                             "style": "background-color: #ffedd5; color: #c2410c; outline: 1px solid #ea580c; outline-offset: -1px; padding: 0 2px; border-radius: 4px;"
                         })
@@ -1755,30 +1759,45 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                 # Подсвечиваем разрывы слов и опечатки
                 for item in words_to_highlight:
                     bad_word = item["word"]
+                    phrase = item.get("phrase")
                     title_text = item["title"]
                     style_str = item["style"]
                     
-                    pattern = rf'\b{bad_word}\b'
-                    if re.search(pattern, t):
+                    # 1. Сначала пробуем подсветить всю раздельную фразу (поддерживая любые пробелы и \xa0)
+                    if phrase:
+                        escaped_phrase = re.escape(phrase)
+                        # Заменяем обычные и экранированные пробелы на гибкий шаблон для любых пробелов (включая неразрывные)
+                        pattern_phrase_str = escaped_phrase.replace('\\ ', '[\\s\\xa0]+').replace(' ', '[\\s\\xa0]+')
+                        # Безопасные границы слова для кириллицы ( Lookarounds вместо \b )
+                        pattern_phrase = rf'(?<![а-яА-ЯёЁa-zA-Z]){pattern_phrase_str}(?![а-яА-ЯёЁa-zA-Z])'
+                        
+                        if re.search(pattern_phrase, t, flags=re.IGNORECASE):
+                            t = re.sub(
+                                pattern_phrase, 
+                                lambda m: f"<mark style='{style_str}' title='{title_text}'>{m.group(0)}</mark>", 
+                                t,
+                                flags=re.IGNORECASE
+                            )
+                            continue # Пропускаем замену отдельного слова, так как фраза уже подсвечена целиком
+                            
+                    # 2. Если фраза разбита по разным runs, подсвечиваем отдельное слово с надежными границами
+                    pattern_word = rf'(?<![а-яА-ЯёЁa-zA-Z]){re.escape(bad_word)}(?![а-яА-ЯёЁa-zA-Z])'
+                    if re.search(pattern_word, t, flags=re.IGNORECASE):
                         t = re.sub(
-                            pattern, 
-                            f"<mark style='{style_str}' title='{title_text}'>{bad_word}</mark>", 
-                            t
+                            pattern_word, 
+                            lambda m: f"<mark style='{style_str}' title='{title_text}'>{m.group(0)}</mark>", 
+                            t,
+                            flags=re.IGNORECASE
                         )
-
+                        
             if run.bold: t = f"<b>{t}</b>"
             if run.italic: t = f"<i>{t}</i>"
             content_html += t
             
-        p_class_attr = ''
-        p_title_attr = ''
         if apak_style_error:
-            # Ставим класс на сам <p>, чтобы подсветка была гарантированно видна
-            p_class_attr = ' class="apak-error"'
-            if apak_title:
-                p_title_attr = f' title="{apak_title}"'
+            content_html = f'<span class="apak-error" title="{apak_title}">{content_html}</span>'
 
-        p_html = f'<p{p_class_attr}{p_title_attr} style="{p_style}">{content_html}</p>'
+        p_html = f'<p style="{p_style}">{content_html}</p>'
         html_lines.append(p_html)
         prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
 

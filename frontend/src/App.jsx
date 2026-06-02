@@ -900,15 +900,23 @@ if (initializing) {
                               strokeLinecap="round" stroke="currentColor" fill="transparent" r="70" cx="80" cy="80" 
                             />
                           </svg>
-                          <div className="absolute inset-0 flex items-center justify-center text-4xl font-black italic text-slate-800">
-                            {((result.score || 0) * 100).toFixed(0)}%
+                          {/* Интуитивно понятный текст внутри круга */}
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-800">
+                            <span className="text-4xl font-black italic">{((result.score || 0) * 100).toFixed(0)}%</span>
+                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 mt-1">Шанс ИИ</span>
                           </div>
                         </div>
 
-                        <h2 className={`text-xl font-black uppercase mb-2 ${result.label === 'AI' ? 'text-red-600' : 'text-green-600'}`}>
-                          {result.label === 'AI' ? 'Машинный текст' : 'Человек'}
-                        </h2>
-
+                        {/* Интуитивно понятный блок вердикта */}
+                        <div className="bg-slate-50/50 rounded-2xl p-5 border border-slate-100 mb-6">
+                          <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Итоговый вердикт</p>
+                          <h2 className={`text-2xl font-black uppercase mt-1.5 ${result.label === 'AI' ? 'text-red-600' : 'text-green-600'}`}>
+                            {result.label === 'AI' ? 'Машинный текст' : 'Человек'}
+                          </h2>
+                          <p className="text-[11px] text-slate-500 font-medium mt-2 leading-relaxed">
+                            Обнаружено <b>{((result.score || 0) * 100).toFixed(0)}%</b> вероятности генерации текста нейросетью.
+                          </p>
+                        </div>
                         
                         {settings.feedback_enabled && result && result.id && (
                           <div className="mt-6 border-t border-slate-100 pt-6">
