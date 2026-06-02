@@ -235,6 +235,153 @@ def check_formatting(file_bytes, settings: database.CheckSettings):
         if refs_count < settings.min_references:
             errors.append(f"[Библиография] Источники: найдено {refs_count} (минимум {settings.min_references})")
 
+        # --- 4. ПРОВЕРКА АПАК: ЖИРНОСТЬ И КУРСИВ ---
+        def _effective_prop_from_style(style, prop: str):
+            try:
+                s = style
+                while s is not None:
+                    font = getattr(s, "font", None)
+                    if font is not None:
+                        v = getattr(font, prop, None)
+                        if v is not None:
+                            return v
+                    s = getattr(s, "base_style", None)
+            except Exception:
+                pass
+            return None
+
+        def _paragraph_has_effective_bold(paragraph):
+            try:
+                if any((run.bold is True) for run in paragraph.runs if run.text and run.text.strip()):
+                    return True
+            except Exception:
+                pass
+            return _effective_prop_from_style(getattr(paragraph, "style", None), "bold") is True
+
+        def _paragraph_has_effective_italic(paragraph):
+            try:
+                if any((run.italic is True) for run in paragraph.runs if run.text and run.text.strip()):
+                    return True
+            except Exception:
+                pass
+            return _effective_prop_from_style(getattr(paragraph, "style", None), "italic") is True
+
+        def _has_cyrillic(s: str) -> bool:
+            return bool(re.search(r"[А-Яа-яЁё]", s or ""))
+
+        def _has_latin(s: str) -> bool:
+            return bool(re.search(r"[A-Za-z]", s or ""))
+
+        # Если аннотация не помечена словом "Аннотация/Abstract",
+        # считаем телом аннотации ближайший содержательный абзац перед "Ключевые слова/Keywords".
+        def _is_service_line(lt: str) -> bool:
+            return any(x in lt for x in [
+                "удк", "udc", "e-mail", "mail.ru", "yandex.ru", "gmail.com",
+                "reshetnev", "university", "сибирский государственный", "красноярск", "krasnoyarsk",
+                "scientific supervisor", "научный руководитель", "©", "(c)"
+            ])
+
+        def _find_abstract_before_keywords(keywords_idx: int, want_lang: str):
+            if keywords_idx is None:
+                return None
+
+            def _mostly_lang(s: str, lang: str) -> bool:
+                # Allow small inserts of the other alphabet (e.g. "UX", "API")
+                letters = re.findall(r"[A-Za-zА-Яа-яЁё]", s or "")
+                if not letters:
+                    return False
+                cyr = sum(1 for ch in letters if re.match(r"[А-Яа-яЁё]", ch))
+                lat = sum(1 for ch in letters if re.match(r"[A-Za-z]", ch))
+                total = cyr + lat
+                if total == 0:
+                    return False
+                if lang == "ru":
+                    return cyr / total >= 0.70
+                return lat / total >= 0.70
+
+            for j in range(keywords_idx - 1, max(-1, keywords_idx - 20), -1):
+                pt = (doc.paragraphs[j].text or "").strip()
+                if not pt:
+                    continue
+                lt = pt.lower()
+                if _is_service_line(lt):
+                    continue
+                if lt.startswith(("ключевые слова", "keywords", "аннотация", "abstract", "таблица")):
+                    continue
+                if len(pt) < 60 or pt.isupper():
+                    continue
+                if want_lang == "ru" and _has_cyrillic(pt) and _mostly_lang(pt, "ru"):
+                    return j
+                if want_lang == "en" and _has_latin(pt) and _mostly_lang(pt, "en"):
+                    return j
+            return None
+
+        ru_keywords_idx = None
+        en_keywords_idx = None
+        for i, p in enumerate(doc.paragraphs[:120]):
+            lt = (p.text or "").strip().lower()
+            if ru_keywords_idx is None and lt.startswith("ключевые слова"):
+                ru_keywords_idx = i
+            if en_keywords_idx is None and lt.startswith("keywords"):
+                en_keywords_idx = i
+            if ru_keywords_idx is not None and en_keywords_idx is not None:
+                break
+
+        ru_abstract_guess_idx = _find_abstract_before_keywords(ru_keywords_idx, "ru") if ru_keywords_idx is not None else None
+        en_abstract_guess_idx = _find_abstract_before_keywords(en_keywords_idx, "en") if en_keywords_idx is not None else None
+
+        for p in doc.paragraphs:
+            text = p.text.strip().lower()
+
+            # Название статьи (русское и английское)
+            if len(text) > 20 and text.isupper():
+                is_bold = _paragraph_has_effective_bold(p)
+
+                if not is_bold:
+                    errors.append(
+                        "[АПАК] Название статьи должно быть выделено жирным шрифтом"
+                    )
+
+            # Заголовок библиографии
+            if "библиографические ссылки" in text:
+                is_bold = _paragraph_has_effective_bold(p)
+
+                if not is_bold:
+                    errors.append(
+                        "[АПАК] Заголовок 'Библиографические ссылки' должен быть жирным"
+                    )
+
+            # Аннотация / Abstract
+            if text.startswith("аннотация") or text.startswith("abstract"):
+                has_italic = _paragraph_has_effective_italic(p)
+
+                if not has_italic:
+                    errors.append(
+                        "[АПАК] Аннотация должна быть оформлена курсивом"
+                    )
+
+            # Ключевые слова / Keywords
+            if (
+                text.startswith("ключевые слова")
+                or text.startswith("keywords")
+            ):
+                has_italic = _paragraph_has_effective_italic(p)
+
+                if not has_italic:
+                    errors.append(
+                        "[АПАК] Блок ключевых слов должен быть оформлен курсивом"
+                    )
+
+        # Аннотация без явного маркера "Аннотация/Abstract"
+        for guessed_idx in [ru_abstract_guess_idx, en_abstract_guess_idx]:
+            if guessed_idx is None:
+                continue
+            p = doc.paragraphs[guessed_idx]
+            if not _paragraph_has_effective_italic(p):
+                msg = "[АПАК] Аннотация должна быть оформлена курсивом"
+                if msg not in errors:
+                    errors.append(msg)
+
     except Exception as e:
         print(f"Error in check_formatting: {e}")
         errors.append("[Система] Ошибка при чтении структуры DOCX")
@@ -1136,6 +1283,170 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     if settings.norm_enabled and settings.check_apak:
         format_check_errors = check_formatting(file_bytes, settings)
         errors.extend(format_check_errors)
+
+    # --- ПРЕДВАРИТЕЛЬНО: находим двуязычные блоки (RU/EN), чтобы подсветить их в HTML ---
+    def _has_cyrillic(s: str) -> bool:
+        return bool(re.search(r"[А-Яа-яЁё]", s or ""))
+
+    def _has_latin(s: str) -> bool:
+        return bool(re.search(r"[A-Za-z]", s or ""))
+
+    ru_abstract_idx = None
+    en_abstract_idx = None
+    ru_keywords_idx = None
+    en_keywords_idx = None
+    biblio_links_header_idx = None  # именно "Библиографические ссылки"
+
+    for i, p in enumerate(doc.paragraphs):
+        t = (p.text or "").strip()
+        lt = t.lower()
+        if not t:
+            continue
+        if ru_abstract_idx is None and lt.startswith("аннотация"):
+            ru_abstract_idx = i
+        if en_abstract_idx is None and lt.startswith("abstract"):
+            en_abstract_idx = i
+        if ru_keywords_idx is None and lt.startswith("ключевые слова"):
+            ru_keywords_idx = i
+        if en_keywords_idx is None and lt.startswith("keywords"):
+            en_keywords_idx = i
+        if biblio_links_header_idx is None and "библиографические ссылки" in lt:
+            biblio_links_header_idx = i
+
+    # Эвристика: если "Аннотация/Abstract" не подписана словами "Аннотация/Abstract",
+    # считаем аннотацией ближайший содержательный абзац перед keywords в каждой языковой части.
+    def _is_service_line(lt: str) -> bool:
+        return any(x in lt for x in [
+            "удк", "udc", "e-mail", "mail.ru", "yandex.ru", "gmail.com",
+            "reshetnev", "university", "сибирский государственный", "красноярск", "krasnoyarsk",
+            "scientific supervisor", "научный руководитель", "©", "(c)"
+        ])
+
+    def _find_abstract_before_keywords(keywords_idx: int, want_lang: str):
+        if keywords_idx is None:
+            return None
+
+        def _mostly_lang(s: str, lang: str) -> bool:
+            letters = re.findall(r"[A-Za-zА-Яа-яЁё]", s or "")
+            if not letters:
+                return False
+            cyr = sum(1 for ch in letters if re.match(r"[А-Яа-яЁё]", ch))
+            lat = sum(1 for ch in letters if re.match(r"[A-Za-z]", ch))
+            total = cyr + lat
+            if total == 0:
+                return False
+            if lang == "ru":
+                return cyr / total >= 0.70
+            return lat / total >= 0.70
+
+        for j in range(keywords_idx - 1, max(-1, keywords_idx - 20), -1):
+            pt = (doc.paragraphs[j].text or "").strip()
+            if not pt:
+                continue
+            lt = pt.lower()
+            if _is_service_line(lt):
+                continue
+            if lt.startswith(("ключевые слова", "keywords", "аннотация", "abstract", "таблица")):
+                continue
+            if len(pt) < 60 or pt.isupper():
+                continue
+            if want_lang == "ru" and _has_cyrillic(pt) and _mostly_lang(pt, "ru"):
+                return j
+            if want_lang == "en" and _has_latin(pt) and _mostly_lang(pt, "en"):
+                return j
+        return None
+
+    if ru_abstract_idx is None and ru_keywords_idx is not None:
+        ru_abstract_idx = _find_abstract_before_keywords(ru_keywords_idx, "ru")
+    if en_abstract_idx is None and en_keywords_idx is not None:
+        en_abstract_idx = _find_abstract_before_keywords(en_keywords_idx, "en")
+
+    # Эффективные свойства (с учётом наследования стилей)
+    def _effective_prop_from_style(style, prop: str):
+        try:
+            s = style
+            while s is not None:
+                font = getattr(s, "font", None)
+                if font is not None:
+                    v = getattr(font, prop, None)
+                    if v is not None:
+                        return v
+                s = getattr(s, "base_style", None)
+        except Exception:
+            pass
+        return None
+
+    def _paragraph_has_effective_bold(paragraph):
+        try:
+            if any((run.bold is True) for run in paragraph.runs if run.text and run.text.strip()):
+                return True
+        except Exception:
+            pass
+        return _effective_prop_from_style(getattr(paragraph, "style", None), "bold") is True
+
+    def _paragraph_has_effective_italic(paragraph):
+        try:
+            if any((run.italic is True) for run in paragraph.runs if run.text and run.text.strip()):
+                return True
+        except Exception:
+            pass
+        return _effective_prop_from_style(getattr(paragraph, "style", None), "italic") is True
+
+    # Пытаемся выделить названия (RU+EN) в верхней части документа
+    ru_title_idx = None
+    en_title_idx = None
+
+    def _uppercase_ratio(s: str) -> float:
+        letters = [ch for ch in (s or "") if ch.isalpha()]
+        if not letters:
+            return 0.0
+        upp = sum(1 for ch in letters if ch.isupper())
+        return upp / max(1, len(letters))
+
+    # Ограничиваем поиск заголовков верхом документа и до первых аннотаций,
+    # иначе можно ошибочно принять за "название" первый обычный абзац ("В данной работе...").
+    search_limit = 30
+    if ru_abstract_idx is not None:
+        search_limit = min(search_limit, ru_abstract_idx)
+    if en_abstract_idx is not None:
+        search_limit = min(search_limit, en_abstract_idx)
+
+    for i, p in enumerate(doc.paragraphs[: max(0, search_limit)]):
+        t = (p.text or "").strip()
+        lt = t.lower()
+        if not t:
+            continue
+        if lt.startswith(("удк", "udc", "аннотация", "abstract", "ключевые слова", "keywords", "таблица")):
+            continue
+        if "©" in lt or "(c)" in lt:
+            continue
+        # Не считаем заголовки библиографии как "названия"
+        if any(x in lt for x in ["список литературы", "библиографическ", "references"]):
+            continue
+        # Отсекаем служебные строки (email, универ, адрес)
+        if any(x in lt for x in ["e-mail", "mail.ru", "yandex.ru", "gmail.com", "reshetnev", "university", "красноярск", "krasnoyarsk"]):
+            continue
+        # Делаем простое ограничение по длине, чтобы не цеплять основной текст
+        if len(t) < 10 or len(t) > 220:
+            continue
+
+        # Заголовок чаще всего без точки и выглядит "титульно": преимущественно ВЕРХНИЙ РЕГИСТР,
+        # нередко по центру. Если этого нет — не считаем кандидатом на название.
+        if t.endswith("."):
+            continue
+        ratio = _uppercase_ratio(t)
+        is_title_like_case = t.isupper() or ratio >= 0.70
+        is_title_like_alignment = (p.alignment is None) or (int(p.alignment) == 1)
+        if not (is_title_like_case and is_title_like_alignment):
+            continue
+
+        if ru_title_idx is None and _has_cyrillic(t) and not _has_latin(t):
+            ru_title_idx = i
+        elif en_title_idx is None and _has_latin(t) and not _has_cyrillic(t):
+            en_title_idx = i
+
+        if ru_title_idx is not None and en_title_idx is not None:
+            break
     
     current_block = "header" 
     empty_lines = 0
@@ -1287,7 +1598,8 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
             if settings.norm_enabled and settings.check_apak and (total_gap < 10 or total_gap > 30):
                 errors.append(f"[АПАК] Неверный интервал перед копирайтом"); is_spacing_error = True
         elif len(stripped_text) < 80 and (("библиографическ" in lower_text and "ссылк" in lower_text) or "список литературы" in lower_text or "references" in lower_text):
-            current_block = "references_header"; alignment = "center"; indent = "0"; in_references_section = True; is_bold_override = True
+            # ВАЖНО: не форсируем жирный шрифт, иначе визуально "исправим" ошибку и её нельзя будет увидеть.
+            current_block = "references_header"; alignment = "center"; indent = "0"; in_references_section = True
         elif in_references_section:
             current_block = "reference_item"; alignment = "justify"; indent = "0" 
         elif lower_text.startswith(("аннотация", "abstract", "ключевые слова", "keywords")):
@@ -1313,8 +1625,56 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
         if is_bold_override: p_style += "font-weight: bold; "
         if is_italic_override: p_style += "font-style: italic; "
         if is_spacing_error: p_style += "background-color: #fef08a; outline: 2px dashed #ca8a04; border-radius: 2px; "
+        
+        # --- АПАК: подсветка ошибок курсива/жирности в двуязычных блоках ---
+        apak_style_error = False
+        apak_title = ""
+        if settings.norm_enabled and settings.check_apak:
+            # Аннотация должна быть курсивом (даже если в документе присутствует только один язык)
+            if (ru_abstract_idx is not None and idx == ru_abstract_idx) or (en_abstract_idx is not None and idx == en_abstract_idx):
+                has_italic = _paragraph_has_effective_italic(p)
+                if not has_italic:
+                    apak_style_error = True
+                    apak_title = "АПАК: аннотация должна быть курсивом"
+                    msg = "[АПАК] Аннотация должна быть оформлена курсивом"
+                    if msg not in errors:
+                        errors.append(msg)
 
-        p_html = f'<p style="{p_style}">'
+            # Ключевые слова должны быть курсивом (по каждому языку отдельно)
+            if (ru_keywords_idx is not None and idx == ru_keywords_idx) or (en_keywords_idx is not None and idx == en_keywords_idx):
+                has_italic = _paragraph_has_effective_italic(p)
+                if not has_italic:
+                    apak_style_error = True
+                    apak_title = "АПАК: ключевые слова должны быть курсивом"
+                    msg = "[АПАК] Блок ключевых слов должен быть оформлен курсивом"
+                    if msg not in errors:
+                        errors.append(msg)
+
+            # Названия на 2 языках должны быть жирными (если нашли оба)
+            if (ru_title_idx is not None and en_title_idx is not None) and (idx == ru_title_idx or idx == en_title_idx):
+                has_bold = _paragraph_has_effective_bold(p)
+                if not has_bold:
+                    apak_style_error = True
+                    apak_title = "АПАК: названия (RU/EN) должны быть жирными"
+                    msg = "[АПАК] Название статьи должно быть выделено жирным шрифтом"
+                    if msg not in errors:
+                        errors.append(msg)
+
+            # Заголовок "Библиографические ссылки" должен быть жирным
+            if biblio_links_header_idx is not None and idx == biblio_links_header_idx:
+                has_bold = _paragraph_has_effective_bold(p)
+                if not has_bold:
+                    apak_style_error = True
+                    apak_title = "АПАК: заголовок 'Библиографические ссылки' должен быть жирным"
+                    msg = "[АПАК] Заголовок 'Библиографические ссылки' должен быть жирным"
+                    if msg not in errors:
+                        errors.append(msg)
+
+        # Безопасно экранируем title
+        if apak_title:
+            apak_title = apak_title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
+        content_html = ""
 
         # ТЕПЕРЬ МЫ НИКОГДА НЕ ПРОПУСКАЕМ p.runs И ВСЕГДА ВЫПОЛНЯЕМ ПРОВЕРКУ ШРИФТОВ!
         marker_added = False 
@@ -1408,9 +1768,17 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
 
             if run.bold: t = f"<b>{t}</b>"
             if run.italic: t = f"<i>{t}</i>"
-            p_html += t
+            content_html += t
             
-        p_html += "</p>"
+        p_class_attr = ''
+        p_title_attr = ''
+        if apak_style_error:
+            # Ставим класс на сам <p>, чтобы подсветка была гарантированно видна
+            p_class_attr = ' class="apak-error"'
+            if apak_title:
+                p_title_attr = f' title="{apak_title}"'
+
+        p_html = f'<p{p_class_attr}{p_title_attr} style="{p_style}">{content_html}</p>'
         html_lines.append(p_html)
         prev_p_spacing_after = p.paragraph_format.space_after.pt if p.paragraph_format.space_after else 0
 
