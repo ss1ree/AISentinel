@@ -1120,7 +1120,7 @@ if (initializing) {
                         <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 w-1/3">Документ</th>
                         <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 w-[100px]">Вердикт</th>
                         <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400">Оформление</th>
-                        <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 w-[100px] text-right">Точность</th>
+                        <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 w-[110px] text-right">Точность</th>
                         <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 w-[100px] text-right">Удалить</th>
                       </tr>
                     </thead>
