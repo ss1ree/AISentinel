@@ -1207,7 +1207,7 @@ if (initializing) {
                             </td>
 
                             <td className="p-8 text-right font-black text-slate-700 text-sm tracking-tighter">
-                              {(item.score * 100).toFixed(1)}%
+                              {(item.score * 100).toFixed(1)}% ИИ
                             </td>
 
                             <td className="p-8 text-right">
