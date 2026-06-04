@@ -5,27 +5,16 @@ import datetime
 import os
 
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
-if not SQLALCHEMY_DATABASE_URL:
-    # Безопасный fallback для локальной разработки — sqlite файл рядом с модулем
-    base_dir = os.path.dirname(__file__)
-    SQLALCHEMY_DATABASE_URL = f"sqlite:///{os.path.join(base_dir, 'app.db')}"
 # Строка подключения к PostgreSQL в Docker
 # SQLALCHEMY_DATABASE_URL = "postgresql://user:password@localhost:5432/ai_detector"
 
-# При использовании SQLite некоторые параметры пула не применимы
-if SQLALCHEMY_DATABASE_URL.startswith('sqlite:'):
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        connect_args={"check_same_thread": False}
-    )
-else:
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        pool_size=30,
-        max_overflow=50,
-        pool_timeout=30,
-        pool_pre_ping=True
-    )
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_size=30,           # Базовое количество подключений (хватит на всех)
+    max_overflow=50,        # Сколько можно создать сверх базы при нагрузке
+    pool_timeout=30,        # Время ожидания
+    pool_pre_ping=True      # ВАЖНО: автоматически переподключаться при обрыве связи с Railway БД
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -55,13 +44,20 @@ class DetectionResult(Base):
     owner_id = Column(Integer, ForeignKey("users.id"))
     owner = relationship("User", back_populates="results")
     user_feedback = Column(Boolean, nullable=True)
+    version = Column(Integer, default=1)
+    
+    training_samples = relationship("TrainingData", back_populates="result", cascade="all, delete-orphan")
+
 
 class TrainingData(Base):
     __tablename__ = "training_data"
     id = Column(Integer, primary_key=True, index=True)
+    result_id = Column(Integer, ForeignKey("results.id", ondelete="CASCADE"), nullable=True)
     text_content = Column(Text)
     label = Column(Integer) # 1 - AI, 0 - Human
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    result = relationship("DetectionResult", back_populates="training_samples")
 
 class CheckSettings(Base):
     __tablename__ = "check_settings"

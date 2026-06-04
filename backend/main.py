@@ -28,6 +28,9 @@ import platform
 import pandas as pd
 import httpx
 import requests
+import xml.etree.ElementTree as ET
+import zipfile
+from docx.oxml.ns import qn
 
 IS_WINDOWS = platform.system() == "Windows"
 if IS_WINDOWS:
@@ -138,6 +141,193 @@ model_registry = {
     "ai_detector": None
 }
 
+def get_theme_fonts(file_bytes: bytes) -> dict:
+    """Извлекает из XML-структуры темы docx-файла реальные шрифты для тем minor/major."""
+    theme_fonts = {"major": None, "minor": None}
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+            theme_path = None
+            for name in z.namelist():
+                if "theme/theme1.xml" in name:
+                    theme_path = name
+                    break
+            if theme_path:
+                theme_xml = z.read(theme_path)
+                root = ET.fromstring(theme_xml)
+                ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+                major_latin = root.find(".//a:majorFont/a:latin", ns)
+                minor_latin = root.find(".//a:minorFont/a:latin", ns)
+                if major_latin is not None:
+                    theme_fonts["major"] = major_latin.get("typeface")
+                if minor_latin is not None:
+                    theme_fonts["minor"] = minor_latin.get("typeface")
+    except Exception as e:
+        print(f"[ThemeResolver] Ошибка чтения шрифтов темы: {e}", flush=True)
+    return theme_fonts
+
+def get_rFonts_from_element(element):
+    """Безопасно извлекает элемент w:rFonts из XML-элемента без генерации исключений."""
+    if element is None:
+        return None
+    rPr = element.find(qn('w:rPr'))
+    if rPr is None:
+        if element.tag.endswith('rPr'):
+            rPr = element
+        else:
+            return None
+    return rPr.find(qn('w:rFonts'))
+
+def get_sz_from_element(element):
+    """Безопасно извлекает размер шрифта в pt из XML-элемента."""
+    if element is None:
+        return None
+    rPr = element.find(qn('w:rPr'))
+    if rPr is None:
+        if element.tag.endswith('rPr'):
+            rPr = element
+        else:
+            return None
+    sz = rPr.find(qn('w:sz'))
+    if sz is not None:
+        val = sz.get(qn('w:val'))
+        if val:
+            try:
+                # В XML размер указывается в полупунктах (half-points), делим на 2
+                return float(val) / 2.0
+            except ValueError:
+                pass
+    return None
+
+def resolve_font_name(run, paragraph, doc, theme_fonts: dict = None) -> str:
+    """Глубокий резолвер шрифта для конкретного run с учетом тем и умолчаний."""
+    # 1. Явный шрифт в python-docx
+    if run.font and run.font.name:
+        return run.font.name
+
+    # 2. Прямой парсинг XML-тегов <w:rFonts> текущего run
+    try:
+        rFonts = get_rFonts_from_element(run._r)
+        if rFonts is not None:
+            for attr in ['ascii', 'hAnsi', 'cs', 'eastAsia']:
+                val = rFonts.get(qn(f'w:{attr}'))
+                if val:
+                    return val
+            if theme_fonts:
+                for attr in ['asciiTheme', 'hAnsiTheme', 'cstheme', 'eastAsiaTheme']:
+                    theme_val = rFonts.get(qn(f'w:{attr}'))
+                    if theme_val:
+                        if 'minor' in theme_val.lower() and theme_fonts.get("minor"):
+                            return theme_fonts["minor"]
+                        if 'major' in theme_val.lower() and theme_fonts.get("major"):
+                            return theme_fonts["major"]
+    except Exception:
+        pass
+
+    # 3. Шрифт стиля абзаца в python-docx
+    if paragraph.style and hasattr(paragraph.style, 'font') and paragraph.style.font and paragraph.style.font.name:
+        return paragraph.style.font.name
+
+    # 4. XML-теги <w:rFonts> на уровне стиля абзаца
+    try:
+        rFonts = get_rFonts_from_element(paragraph.style.element)
+        if rFonts is not None:
+            for attr in ['ascii', 'hAnsi', 'cs', 'eastAsia']:
+                val = rFonts.get(qn(f'w:{attr}'))
+                if val:
+                    return val
+            if theme_fonts:
+                for attr in ['asciiTheme', 'hAnsiTheme', 'cstheme', 'eastAsiaTheme']:
+                    theme_val = rFonts.get(qn(f'w:{attr}'))
+                    if theme_val:
+                        if 'minor' in theme_val.lower() and theme_fonts.get("minor"):
+                            return theme_fonts["minor"]
+                        if 'major' in theme_val.lower() and theme_fonts.get("major"):
+                            return theme_fonts["major"]
+    except Exception:
+        pass
+
+    # 5. Умолчания документа в <w:docDefaults> (styles.xml)
+    try:
+        styles_el = doc.styles.element
+        docDefaults = styles_el.find(qn('w:docDefaults'))
+        if docDefaults is not None:
+            rPrDefault = docDefaults.find(qn('w:rPrDefault'))
+            if rPrDefault is not None:
+                rFonts = get_rFonts_from_element(rPrDefault)
+                if rFonts is not None:
+                    for attr in ['ascii', 'hAnsi', 'cs', 'eastAsia']:
+                        val = rFonts.get(qn(f'w:{attr}'))
+                        if val:
+                            return val
+                    if theme_fonts:
+                        for attr in ['asciiTheme', 'hAnsiTheme', 'cstheme', 'eastAsiaTheme']:
+                            theme_val = rFonts.get(qn(f'w:{attr}'))
+                            if theme_val:
+                                if 'minor' in theme_val.lower() and theme_fonts.get("minor"):
+                                    return theme_fonts["minor"]
+                                if 'major' in theme_val.lower() and theme_fonts.get("major"):
+                                    return theme_fonts["major"]
+    except Exception:
+        pass
+
+    # 6. Базовый шрифт Normal-стиля
+    try:
+        normal_font = doc.styles['Normal'].font.name
+        if normal_font:
+            return normal_font
+    except Exception:
+        pass
+
+    return None
+
+def resolve_font_size(run, paragraph, doc) -> float:
+    """Глубокий резолвер размера шрифта для run с учетом умолчаний и стилей."""
+    # 1. Явный размер в python-docx
+    if run.font and run.font.size:
+        return run.font.size.pt
+
+    # 2. XML-теги <w:sz> текущего run
+    try:
+        val = get_sz_from_element(run._r)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+
+    # 3. Размер в стиле абзаца в python-docx
+    if paragraph.style and hasattr(paragraph.style, 'font') and paragraph.style.font and paragraph.style.font.size:
+        return paragraph.style.font.size.pt
+
+    # 4. XML-теги <w:sz> на уровне стиля абзаца
+    try:
+        val = get_sz_from_element(paragraph.style.element)
+        if val is not None:
+            return val
+    except Exception:
+        pass
+
+    # 5. Умолчания документа в <w:docDefaults> (styles.xml)
+    try:
+        styles_el = doc.styles.element
+        docDefaults = styles_el.find(qn('w:docDefaults'))
+        if docDefaults is not None:
+            rPrDefault = docDefaults.find(qn('w:rPrDefault'))
+            if rPrDefault is not None:
+                val = get_sz_from_element(rPrDefault)
+                if val is not None:
+                    return val
+    except Exception:
+        pass
+
+    # 6. Базовый размер Normal-стиля
+    try:
+        if doc.styles['Normal'].font.size:
+            return doc.styles['Normal'].font.size.pt
+    except Exception:
+        pass
+
+    return None
+
 def unload_model(model_key):
     global model_registry
     if model_registry[model_key] is not None:
@@ -168,6 +358,7 @@ def get_current_user(authorization: str = Header(None), db: Session = Depends(ge
     
 def check_formatting(file_bytes, settings: database.CheckSettings):
     errors = []
+    theme_fonts = None
     try:
         doc = Document(io.BytesIO(file_bytes))
         
@@ -201,10 +392,9 @@ def check_formatting(file_bytes, settings: database.CheckSettings):
             for run in p.runs:
                 if not run.text.strip(): continue
                 
-                # Имя шрифта (берем из run или из стиля абзаца)
-                f_name = run.font.name or p.style.font.name
-                # Размер шрифта
-                f_size = run.font.size.pt if run.font.size else (p.style.font.size.pt if p.style.font.size else None)
+                # Использование новых безопасных резолверов без xpath
+                f_name = resolve_font_name(run, p, doc, theme_fonts)
+                f_size = resolve_font_size(run, p, doc)
 
                 if f_name and f_name != settings.font_name and not font_err_shown:
                     errors.append(f"[Типографика] Шрифт: обнаружен {f_name} (нужен {settings.font_name})")
@@ -909,6 +1099,7 @@ def save_feedback(result_id: int, correct: bool, db: Session = Depends(get_db), 
 
     # Запись в новую таблицу
     new_train_data = database.TrainingData(
+        result_id=db_result.id,
         text_content=db_result.text_content, 
         label=final_label
     )
@@ -1019,6 +1210,7 @@ async def norm_control(file: UploadFile = File(...), db: Session = Depends(get_d
 
     content = await file.read()
     doc = docx.Document(io.BytesIO(content))
+    theme_fonts = get_theme_fonts(content)
     
     errors = []
     
@@ -1031,15 +1223,18 @@ async def norm_control(file: UploadFile = File(...), db: Session = Depends(get_d
     # 2. Проверка шрифта и размера (по первому абзацу текста)
     for paragraph in doc.paragraphs:
         if paragraph.text.strip(): # Пропускаем пустые строки
-            # Проверка шрифта
-            font = paragraph.runs[0].font
-            if font.name and font.name != settings.font_name:
-                errors.append(f"Шрифт: обнаружен {font.name} (нужен {settings.font_name})")
+            run = paragraph.runs[0]
             
-            # Проверка размера
-            if font.size and font.size.pt != settings.font_size:
-                errors.append(f"Размер шрифта: {font.size.pt}pt (нужно {settings.font_size}pt)")
-            break # Проверяем только начало для примера
+            # Новые резолверы
+            f_name = resolve_font_name(run, paragraph, doc, theme_fonts)
+            f_size = resolve_font_size(run, paragraph, doc)
+            
+            if f_name and f_name != settings.font_name:
+                errors.append(f"Шрифт: обнаружен {f_name} (нужен {settings.font_name})")
+            
+            if f_size and f_size != settings.font_size:
+                errors.append(f"Размер шрифта: {f_size}pt (нужно {settings.font_size}pt)")
+            break
 
     # 3. Проверка литературы (Блок 4)
     # Ищем заголовок "Библиографический список" или "Список литературы"
@@ -1276,6 +1471,7 @@ def get_page_count(file_bytes: bytes, filename: str) -> int:
 
 def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
     doc = docx.Document(io.BytesIO(file_bytes))
+    theme_fonts = get_theme_fonts(file_bytes)
     errors = []
     html_lines = []
     
@@ -1680,7 +1876,6 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
 
         content_html = ""
 
-        # ТЕПЕРЬ МЫ НИКОГДА НЕ ПРОПУСКАЕМ p.runs И ВСЕГДА ВЫПОЛНЯЕМ ПРОВЕРКУ ШРИФТОВ!
         marker_added = False 
         for run in p.runs:
             if not run.text: continue
@@ -1691,24 +1886,40 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                     t = f"–&nbsp;&nbsp;&nbsp;{t}"
                 marker_added = True
                 
-            f_size = None
-            f_name = None
-            has_explicit_size = False
+            # Использование новых резолверов
+            f_name = resolve_font_name(run, p, doc, theme_fonts)
+            f_size = resolve_font_size(run, p, doc)
             
-            if run.font and run.font.size:
-                f_size = run.font.size.pt
-                has_explicit_size = True
-            elif p.style and hasattr(p.style, 'font') and p.style.font and p.style.font.size:
-                f_size = p.style.font.size.pt
-                if p.style.name != 'Normal': has_explicit_size = True
-            elif p.style and hasattr(p.style, 'base_style') and p.style.base_style and hasattr(p.style.base_style, 'font') and p.style.base_style.font and p.style.base_style.font.size:
-                f_size = p.style.base_style.font.size.pt
-                if p.style.base_style.name != 'Normal': has_explicit_size = True
-            else:
-                try: 
-                    if doc.styles['Normal'].font.size:
-                        f_size = doc.styles['Normal'].font.size.pt
-                except: pass
+            # Флаг для совместимости логики
+            has_explicit_size = (run.font and run.font.size is not None)
+            
+            if f_size is not None and round(f_size) == 11 and not has_explicit_size:
+                f_size = expected_size
+
+            # Проверка шрифта
+            if settings.norm_enabled and current_block != "figure":
+                try:
+                    expected_font = str(settings.font_name or "Times New Roman").strip().lower()
+                    actual_f_name = f_name if f_name else "Шрифт темы (Aptos / Calibri)"
+                    found_font = str(actual_f_name).strip().lower()
+                    
+                    name_error = found_font != expected_font
+                    size_error = f_size and abs(round(float(f_size)) - expected_size) > 0.1
+                    
+                    if size_error or name_error:
+                        err_msgs = []
+                        if name_error:
+                            disp_name = settings.font_name or "Times New Roman"
+                            errors.append(f"[Гарнитура] Обнаружен {actual_f_name} (нужен {disp_name})")
+                            err_msgs.append(f"Шрифт: {actual_f_name}")
+                        if size_error:
+                            errors.append(f"[Размер] Ожидался {expected_size}pt, найден {round(f_size)}pt")
+                            err_msgs.append(f"Размер: {round(f_size)}pt")
+                            
+                        title_attr = " | ".join(err_msgs)
+                        t = f"<mark style='background-color: #fecaca; color: #991b1b; padding: 0;' title='{title_attr}'>{t}</mark>"
+                except Exception as e:
+                    print(f"Ошибка парсинга шрифта: {e}", flush=True)
                 
             if run.font and run.font.name:
                 f_name = run.font.name
@@ -1789,7 +2000,7 @@ def process_docx_apak(file_bytes: bytes, settings: database.CheckSettings):
                             t,
                             flags=re.IGNORECASE
                         )
-                        
+
             if run.bold: t = f"<b>{t}</b>"
             if run.italic: t = f"<i>{t}</i>"
             content_html += t
@@ -1859,6 +2070,15 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
             chunks = 1
         else:
             label, score, chunks = run_ai_logic(text)
+            
+            # Эвристический фильтр ложных срабатываний для научных статей (УДК/UDC)
+            # Научный слог АПАК часто путает классификаторы ИИ. Если найден УДК - срезаем скор в 2 раза.
+            first_chars = text_lower[:500].strip()
+            if "удк" in first_chars or "udc" in first_chars:
+                if score > 0.50:
+                    score = round(score / 2.0, 2)
+                    # Пересчитываем вердикт по нашему порогу 0.65
+                    label = "AI" if score > 0.65 else "Human"
     
     unload_model("semantic")
     unload_model("ai_detector")
@@ -1867,16 +2087,24 @@ async def analyze_file(file: UploadFile = File(...), db: Session = Depends(get_d
     # 7. Считаем страницы
     page_count = get_page_count(file_bytes, filename)
 
+    # --- ВЫЧИСЛЕНИЕ ВЕРСИИ ДОКУМЕНТА ---
+    existing_count = db.query(database.DetectionResult).filter(
+        database.DetectionResult.filename == filename,
+        database.DetectionResult.owner_id == user.id
+    ).count()
+    version = existing_count + 1
+
     # 8. Сохраняем итоговый результат в базу данных
     db_result = database.DetectionResult(
         text_content=text,
-        html_content=html_content, # Сохраняем HTML с красной подсветкой АПАК
+        html_content=html_content,
         filename=filename,
         label=label,
         score=float(score),
         format_errors=format_errors,
         page_count=page_count,
-        owner_id=user.id
+        owner_id=user.id,
+        version=version  # <-- ПЕРЕДАЕМ ВЕРСИЮ В БД
     )
     db.add(db_result)
     db.commit()
