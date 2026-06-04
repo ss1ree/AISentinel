@@ -47,7 +47,7 @@ function App() {
   const [showAllAdminUsers, setShowAllAdminUsers] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [selectedVersions, setSelectedVersions] = useState({}); 
-
+  
   // Состояния авторизации
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState('login');
@@ -1125,139 +1125,6 @@ if (initializing) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {history.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50/30 transition-all group">
-                          <td className="p-8 text-xs text-slate-500 font-mono">
-                            {new Date(item.created_at).toLocaleDateString('ru-RU')}
-                          </td>
-                          <td className="p-8">
-                            <div className="flex items-center gap-3">
-                              {item.filename ? (
-                                <FileText size={18} className="text-blue-500 shrink-0" />
-                              ) : (
-                                <Send size={16} className="text-slate-400 shrink-0" />
-                              )}
-                              <p className="text-sm text-slate-700 font-bold truncate italic">
-                                {item.filename || `"${item.text_content.substring(0, 50)}..."`}
-                              </p>
-                            </div>
-                          </td>
-                          <td className="p-8">
-                            <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                              item.label === 'AI' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'
-                            }`}>
-                              {item.label === 'AI' ? 'AI' : 'Human'}
-                            </span>
-                          </td>
-                          
-                          <td className="p-8">
-                            {item.format_errors === null ? (
-                              <span className="text-slate-300 text-[10px] font-bold uppercase">Нет данных</span>
-                            ) : item.format_errors.length === 0 ? (
-                              <div className="flex items-center gap-2 text-green-600 font-black text-[10px] uppercase tracking-widest">
-                                <CheckCircle2 size={14} /> ГОСТ OK
-                              </div>
-                            ) : (
-                              <div className="flex flex-wrap gap-2">
-                                {[...new Set(item.format_errors.map(err => err.match(/\[(.*?)\]/)?.[1] || 'Инфо'))].slice(0, 2).map((cat, idx) => (
-                                  <span key={idx} className="bg-amber-100 text-amber-700 px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-tighter">
-                                    {cat}
-                                  </span>
-                                ))}
-                                {item.format_errors.length > 2 && <span className="text-slate-400 text-[9px] font-bold">...</span>}
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="p-8 text-right font-black text-slate-700 text-sm tracking-tighter">
-                            {(item.score * 100).toFixed(1)}%
-                          </td>
-
-                          <td className="p-8 text-right">
-                            <button 
-                              onClick={() => deleteHistoryItem(item.id)} 
-                              className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  
-                  {history.length === 0 && (
-                    <div className="p-32 text-center text-slate-300 font-black uppercase tracking-widest bg-white">
-                      История сканирований пуста
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'admin' && user?.role === 'admin' && (
-            <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
-              
-              {/* ВЕРХНЯЯ ПАНЕЛЬ: ПОИСК И ГЛОБАЛЬНАЯ ОЧИСТКА */}
-              <div className="flex gap-4 items-center">
-                {/* 1. Поиск (занимает всё свободное место) */}
-                <div className="flex-1 relative">
-                  <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400">
-                    <Search size={22} />
-                  </div>
-                  <input 
-                    type="text"
-                    placeholder="Поиск по email..."
-                    className="w-full pl-16 pr-8 py-6 bg-white border border-slate-200 rounded-[32px] outline-none focus:ring-4 focus:ring-blue-100/50 transition-all font-bold text-slate-700 shadow-sm"
-                    value={adminSearch}
-                    onChange={(e) => setAdminSearch(e.target.value)}
-                  />
-                </div>
-
-                {/* 2. Кнопка Скачать */}
-                <button 
-                  onClick={downloadDataset}
-                  className="flex items-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
-                >
-                  <Database size={18} /> Скачать (CSV)
-                </button>
-
-                {/* 3. Кнопка Очистить */}
-                <button 
-                  onClick={adminWipeAllHistory} 
-                  className="flex items-center justify-center gap-3 px-8 py-6 bg-red-600 text-white hover:bg-red-700 rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
-                >
-                  <ServerCrash size={20} /> Очистить базу
-                </button>
-              </div>
-
-              {/* ТАБЛИЦА ПОЛЬЗОВАТЕЛЕЙ */}
-              <div className="bg-white rounded-[32px] shadow-sm border border-slate-200 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50/50 border-b border-slate-100">
-                        {[
-                          { label: 'ID', key: 'id' },
-                          { label: 'Пользователь', key: 'email' },
-                          { label: 'Роль', key: 'role' },
-                          { label: 'Сканирований', key: 'scans_count' }
-                        ].map((col) => (
-                          <th 
-                            key={col.key}
-                            onClick={() => toggleSort(col.key)}
-                            className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 cursor-pointer hover:text-blue-600 transition-colors"
-                          >
-                            <div className="flex items-center gap-2">
-                              {col.label} <ArrowUpDown size={12} className="opacity-30" />
-                            </div>
-                          </th>
-                        ))}
-                        <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 text-right">Управление</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
                       {getGroupedHistory().map((groupItem) => {
                         // Определяем, какую версию из группы показывать (по умолчанию последнюю)
                         const activeId = selectedVersions[groupItem.filename] || groupItem.id;
@@ -1354,6 +1221,119 @@ if (initializing) {
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                  
+                  {history.length === 0 && (
+                    <div className="p-32 text-center text-slate-300 font-black uppercase tracking-widest bg-white">
+                      История сканирований пуста
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'admin' && user?.role === 'admin' && (
+            <div className="space-y-10 animate-in fade-in slide-in-from-right-4 duration-500">
+              
+              {/* ВЕРХНЯЯ ПАНЕЛЬ: ПОИСК И ГЛОБАЛЬНАЯ ОЧИСТКА */}
+              <div className="flex gap-4 items-center">
+                {/* 1. Поиск (занимает всё свободное место) */}
+                <div className="flex-1 relative">
+                  <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Search size={22} />
+                  </div>
+                  <input 
+                    type="text"
+                    placeholder="Поиск по email..."
+                    className="w-full pl-16 pr-8 py-6 bg-white border border-slate-200 rounded-[32px] outline-none focus:ring-4 focus:ring-blue-100/50 transition-all font-bold text-slate-700 shadow-sm"
+                    value={adminSearch}
+                    onChange={(e) => setAdminSearch(e.target.value)}
+                  />
+                </div>
+
+                {/* 2. Кнопка Скачать */}
+                <button 
+                  onClick={downloadDataset}
+                  className="flex items-center gap-3 px-8 py-6 bg-blue-600 text-white rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                >
+                  <Database size={18} /> Скачать (CSV)
+                </button>
+
+                {/* 3. Кнопка Очистить */}
+                <button 
+                  onClick={adminWipeAllHistory} 
+                  className="flex items-center justify-center gap-3 px-8 py-6 bg-red-600 text-white hover:bg-red-700 rounded-[32px] font-black uppercase tracking-widest text-[11px] shadow-xl shadow-red-500/20 transition-all cursor-pointer active:scale-95 whitespace-nowrap"
+                >
+                  <ServerCrash size={20} /> Очистить базу
+                </button>
+              </div>
+
+              {/* ТАБЛИЦА ПОЛЬЗОВАТЕЛЕЙ */}
+              <div className="bg-white rounded-[32px] shadow-sm border border-slate-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/50 border-b border-slate-100">
+                        {[
+                          { label: 'ID', key: 'id' },
+                          { label: 'Пользователь', key: 'email' },
+                          { label: 'Роль', key: 'role' },
+                          { label: 'Сканирований', key: 'scans_count' }
+                        ].map((col) => (
+                          <th 
+                            key={col.key}
+                            onClick={() => toggleSort(col.key)}
+                            className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 cursor-pointer hover:text-blue-600 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              {col.label} <ArrowUpDown size={12} className="opacity-30" />
+                            </div>
+                          </th>
+                        ))}
+                        <th className="p-8 text-[10px] font-black uppercase tracking-[2px] text-slate-400 text-right">Управление</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {adminUsers
+                        .filter(u => u.email.toLowerCase().includes(adminSearch.toLowerCase()))
+                        .sort((a, b) => {
+                          const factor = adminSort.direction === 'asc' ? 1 : -1;
+                          return a[adminSort.key] > b[adminSort.key] ? factor : -factor;
+                        })
+                        .slice(0, showAllAdminUsers ? undefined : 5)
+                        .map((u) => (
+                          <tr key={u.id} className="hover:bg-slate-50/30 transition-all group">
+                            <td className="p-8 text-xs text-slate-400 font-mono">#{u.id}</td>
+                            <td className="p-8 font-black text-slate-800">{u.email}</td>
+                            <td className="p-8">
+                              <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${u.role === 'admin' ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
+                                {u.role}
+                              </span>
+                            </td>
+                            <td className="p-8 font-mono text-slate-500 font-bold">{u.scans_count} шт.</td>
+                            <td className="p-8 text-right">
+                              <div className="flex justify-end gap-3">
+                                <button 
+                                  onClick={() => adminClearUserHistory(u.id)}
+                                  className="p-3 bg-white border border-slate-100 text-slate-300 hover:text-amber-600 hover:bg-amber-50 rounded-2xl cursor-pointer transition-all active:scale-90"
+                                  title="Очистить сканы"
+                                >
+                                  <Database size={18} />
+                                </button>
+                                <button 
+                                  onClick={() => adminDeleteUser(u.id)} 
+                                  disabled={u.id === user.id} 
+                                  className={`p-3 rounded-2xl transition-all ${u.id === user.id ? 'opacity-10 grayscale cursor-not-allowed' : 'bg-white border border-slate-100 text-slate-300 hover:text-red-500 hover:bg-red-50 cursor-pointer active:scale-90'}`} 
+                                  title="Удалить аккаунт"
+                                >
+                                  <UserX size={18} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
